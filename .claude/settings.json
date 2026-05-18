@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Projects/VibeCoding/Workout-Maps/export-2/apple_health_export/**)"
+    ]
+  }
+}

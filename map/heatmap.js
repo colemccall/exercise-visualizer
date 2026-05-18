@@ -11,8 +11,7 @@
  *   renderHeatmap(activities, map)  → Promise<void>
  */
 
-// Activity type → polyline color
-const TYPE_COLORS = {
+export const TYPE_COLORS = {
   Run:   '#FF6B6B',
   Ride:  '#4A90D9',
   Walk:  '#5CB85C',
@@ -25,11 +24,17 @@ const TYPE_COLORS = {
 let _routeLayerGroup = null;
 let _map = null;
 
+// Polyline registry for timelapse (parallel to rendered activities)
+export let _renderedPolylines = []; // { activity, polyline }
+export let _renderedActivities = [];
+
 /**
  * Initialize the Leaflet heatmap.
  * @param {HTMLElement} container  DOM element for the map
  * @returns {L.Map}
  */
+export function getHeatmapInstance() { return _map; }
+
 export function initHeatmap(container) {
   if (_map) {
     _map.remove();
@@ -94,6 +99,8 @@ export async function renderHeatmap(activities, map) {
 
   // Draw polylines
   const allLatLngs = [];
+  _renderedPolylines = [];
+  _renderedActivities = [];
 
   for (const activity of toRender) {
     const pts = activity.route_points;
@@ -114,6 +121,8 @@ export async function renderHeatmap(activities, map) {
 
     polyline.addTo(_routeLayerGroup);
     allLatLngs.push(...latLngs);
+    _renderedPolylines.push(polyline);
+    _renderedActivities.push(activity);
   }
 
   // Fit map to all rendered routes

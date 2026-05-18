@@ -33,7 +33,7 @@ import { renderHRZones }        from './charts/hr-zones.js';
 import { renderElevationChart, renderHRLineChart } from './charts/elevation.js';
 
 // ── Map imports ───────────────────────────────────────────────────────────────
-import { initHeatmap, renderHeatmap } from './map/heatmap.js';
+import { initHeatmap, renderHeatmap, _renderedPolylines, _renderedActivities, TYPE_COLORS } from './map/heatmap.js';
 import { renderRoute }                from './map/route.js';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -424,6 +424,9 @@ async function refreshHeatmap() {
     heatmapInstance = initHeatmap(container);
   }
   await renderHeatmap(allActivities, heatmapInstance);
+  // Update locations panel after routes are loaded
+  const filtered = getFilteredActivities();
+  renderLocationsPanel(filtered);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -628,7 +631,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Escape') closeDetail();
   });
 
+  // Dark/light mode
+  applyTheme();
+  document.getElementById('btn-theme-toggle')?.addEventListener('click', toggleTheme);
+
+  // Timelapse
+  document.getElementById('tl-play-btn')?.addEventListener('click', tlToggle);
+  document.getElementById('tl-reset-btn')?.addEventListener('click', tlStop);
+  document.getElementById('tl-speed')?.addEventListener('input', (e) => {
+    const val = document.getElementById('tl-speed-val');
+    if (val) val.textContent = `${e.target.value}×`;
+  });
+
 });
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 // UTILITIES
@@ -640,4 +656,271 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// TIMELAPSE
+// ═════════════════════════════════════════════════════════════════════════════
+
+let tlIdx = 0;
+let tlTimer = null;
+let tlRoutes = []; // sorted indices into _renderedActivities
+
+function tlGetSortedRoutes() {
+  // Get indices of rendered polylines sorted by activity date
+  return _renderedActivities
+    .map((a, i) => ({ i, date: a.date }))
+    .filter(x => x.date)
+    .sort((a, b) => a.date - b.date)
+    .map(x => x.i);
+}
+
+function tlUpdateUI(step) {
+  const bar   = document.getElementById('tl-progress-bar');
+  const label = document.getElementById('tl-date-label');
+  const count = document.getElementById('tl-count-label');
+  if (!bar) return;
+
+  const pct = tlRoutes.length > 1 ? (step / (tlRoutes.length - 1)) * 100 : 100;
+  bar.style.width = `${pct}%`;
+
+  const idx = tlRoutes[step];
+  const act = _renderedActivities[idx];
+  if (act && label) {
+    label.textContent = act.date
+      ? act.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      : '';
+  }
+  if (count) count.textContent = `${step + 1} / ${tlRoutes.length}`;
+}
+
+function tlStep() {
+  if (tlIdx >= tlRoutes.length) {
+    tlStop();
+    return;
+  }
+
+  const idx  = tlRoutes[tlIdx];
+  const poly = _renderedPolylines[idx];
+  const act  = _renderedActivities[idx];
+  if (!poly || !act) { tlIdx++; tlStep(); return; }
+
+  const color = TYPE_COLORS[act.type] || TYPE_COLORS.Other;
+
+  // Flash highlight
+  poly.setStyle({ color: '#ffffff', weight: 4, opacity: 1 });
+  setTimeout(() => {
+    poly.setStyle({ color, weight: 2, opacity: 0.7 });
+  }, 350);
+
+  tlUpdateUI(tlIdx);
+  tlIdx++;
+
+  const speed = parseInt(document.getElementById('tl-speed')?.value || '3', 10);
+  const delay = Math.max(40, 500 / speed);
+  tlTimer = setTimeout(tlStep, delay);
+}
+
+function tlPrepare() {
+  if (_renderedActivities.length === 0) {
+    showToast('Load activities with routes first');
+    return false;
+  }
+
+  tlRoutes = tlGetSortedRoutes();
+  if (tlRoutes.length === 0) {
+    showToast('No routable activities to animate');
+    return false;
+  }
+
+  // Dim all polylines to start
+  for (let i = 0; i < _renderedPolylines.length; i++) {
+    const act = _renderedActivities[i];
+    const color = TYPE_COLORS[act?.type] || TYPE_COLORS.Other;
+    _renderedPolylines[i]?.setStyle({ color, weight: 2, opacity: 0.15 });
+  }
+
+  tlIdx = 0;
+  tlUpdateUI(0);
+  return true;
+}
+
+export function tlPlay() {
+  if (tlTimer) return; // already playing
+
+  const btn = document.getElementById('tl-play-btn');
+
+  if (tlIdx === 0 || tlIdx >= tlRoutes.length) {
+    if (!tlPrepare()) return;
+  }
+
+  if (btn) btn.textContent = '⏸ Pause';
+  tlStep();
+}
+
+export function tlPause() {
+  clearTimeout(tlTimer);
+  tlTimer = null;
+  const btn = document.getElementById('tl-play-btn');
+  if (btn) btn.textContent = '▶ Play';
+}
+
+export function tlStop() {
+  clearTimeout(tlTimer);
+  tlTimer = null;
+  tlIdx = 0;
+  tlRoutes = [];
+
+  const btn = document.getElementById('tl-play-btn');
+  if (btn) btn.textContent = '▶ Play';
+
+  const bar = document.getElementById('tl-progress-bar');
+  if (bar) bar.style.width = '0%';
+
+  const label = document.getElementById('tl-date-label');
+  if (label) label.textContent = '';
+
+  const count = document.getElementById('tl-count-label');
+  if (count) count.textContent = '';
+
+  // Restore normal opacity
+  for (let i = 0; i < _renderedPolylines.length; i++) {
+    const act = _renderedActivities[i];
+    const color = TYPE_COLORS[act?.type] || TYPE_COLORS.Other;
+    _renderedPolylines[i]?.setStyle({ color, weight: 2, opacity: 0.6 });
+  }
+}
+
+function tlToggle() {
+  if (tlTimer) {
+    tlPause();
+  } else {
+    tlPlay();
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// MOST VISITED LOCATIONS
+// ═════════════════════════════════════════════════════════════════════════════
+
+const _geocodeCache = new Map();
+
+async function reverseGeocode(lat, lng) {
+  const key = `${lat},${lng}`;
+  if (_geocodeCache.has(key)) return _geocodeCache.get(key);
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10`;
+    const res  = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    if (!res.ok) throw new Error('nominatim error');
+    const data = await res.json();
+    const addr = data.address || {};
+    const name = addr.city || addr.town || addr.village || addr.county || addr.state || addr.country || `${lat.toFixed(1)}°, ${lng.toFixed(1)}°`;
+    _geocodeCache.set(key, name);
+    return name;
+  } catch {
+    const name = `${lat.toFixed(1)}°, ${lng.toFixed(1)}°`;
+    _geocodeCache.set(key, name);
+    return name;
+  }
+}
+
+async function computeTopLocations(activities, limit = 10) {
+  // Cluster activity start points by 0.5° grid cell (~55km)
+  const counts = new Map();
+  const centers = new Map();
+
+  for (const act of activities) {
+    const pts = act.route_points;
+    if (!pts || pts.length === 0) continue;
+    const p = pts.find(x => x.lat !== null && x.lng !== null);
+    if (!p) continue;
+
+    const cellLat = Math.round(p.lat * 2) / 2;
+    const cellLng = Math.round(p.lng * 2) / 2;
+    const key = `${cellLat},${cellLng}`;
+
+    counts.set(key, (counts.get(key) || 0) + 1);
+    if (!centers.has(key)) centers.set(key, { lat: cellLat, lng: cellLng });
+  }
+
+  if (counts.size === 0) return [];
+
+  const sorted = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit);
+
+  // Reverse geocode in parallel (with a small delay between to be polite)
+  const results = [];
+  for (const [key, count] of sorted) {
+    const { lat, lng } = centers.get(key);
+    const name = await reverseGeocode(lat, lng);
+    results.push({ key, name, count, lat, lng });
+    await new Promise(r => setTimeout(r, 100)); // 100ms between Nominatim calls
+  }
+
+  return results;
+}
+
+async function renderLocationsPanel(activities) {
+  const container = document.getElementById('locations-list');
+  if (!container) return;
+
+  container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">Computing locations…</div>';
+
+  const routable = activities.filter(a => a.route_points && a.route_points.length > 0);
+  if (routable.length === 0) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">No route data available. Load activities with GPS routes.</div>';
+    return;
+  }
+
+  const locs = await computeTopLocations(routable, 10);
+  if (locs.length === 0) {
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">No location data</div>';
+    return;
+  }
+
+  const maxCount = locs[0].count;
+
+  container.innerHTML = locs.map((loc, i) => `
+    <div class="loc-row" data-key="${escapeHtml(loc.key)}" data-lat="${loc.lat}" data-lng="${loc.lng}" title="Click to filter">
+      <div class="loc-rank">${i + 1}</div>
+      <div class="loc-info">
+        <div class="loc-name">${escapeHtml(loc.name)}</div>
+        <div class="loc-bar-wrap">
+          <div class="loc-bar" style="width:${Math.round((loc.count / maxCount) * 100)}%"></div>
+        </div>
+      </div>
+      <div class="loc-count">${loc.count}</div>
+    </div>
+  `).join('');
+
+  // Click to zoom map to that location
+  container.querySelectorAll('.loc-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const lat = parseFloat(row.dataset.lat);
+      const lng = parseFloat(row.dataset.lng);
+      if (heatmapInstance && !isNaN(lat) && !isNaN(lng)) {
+        heatmapInstance.setView([lat, lng], 11, { animate: true });
+      }
+    });
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// DARK / LIGHT MODE
+// ═════════════════════════════════════════════════════════════════════════════
+
+let _darkMode = localStorage.getItem('fitness-theme') === 'dark';
+
+function applyTheme() {
+  document.documentElement.classList.toggle('dark-mode', _darkMode);
+  const btn = document.getElementById('btn-theme-toggle');
+  if (btn) btn.textContent = _darkMode ? '☀ Light' : '🌙 Dark';
+}
+
+function toggleTheme() {
+  _darkMode = !_darkMode;
+  localStorage.setItem('fitness-theme', _darkMode ? 'dark' : 'light');
+  applyTheme();
 }
