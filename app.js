@@ -514,7 +514,7 @@ function renderCharts(activities) {
   const hrCard = document.getElementById('chart-hr-card');
   if (hasHR) {
     hrCard.style.display = 'block';
-    const maxHR = parseInt(document.getElementById('input-max-hr').value, 10) || 190;
+    const maxHR = 200;
     renderHRZones(activities, document.getElementById('chart-hr-zones'), maxHR);
   } else {
     hrCard.style.display = 'none';
@@ -867,10 +867,6 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshDashboard();
   });
 
-  // HR max input
-  document.getElementById('input-max-hr').addEventListener('change', () => {
-    if (allActivities.length > 0) renderCharts(getFilteredActivities());
-  });
 
   // Detail panel close
   document.getElementById('btn-close-detail').addEventListener('click', closeDetail);
@@ -1071,12 +1067,27 @@ async function reverseGeocode(lat, lng) {
   if (_geocodeCache.has(key)) return _geocodeCache.get(key);
 
   try {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=10`;
+    // zoom=7 gives region/county level without pinning to a specific town or township
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=7`;
     const res  = await fetch(url, { headers: { 'Accept-Language': 'en' } });
     if (!res.ok) throw new Error('nominatim error');
     const data = await res.json();
     const addr = data.address || {};
-    const name = addr.city || addr.town || addr.village || addr.county || addr.state || addr.country || `${lat.toFixed(1)}°, ${lng.toFixed(1)}°`;
+
+    // Build "Region, State" — skip county/township, prefer state_district or just state
+    const region = addr.state_district || addr.region || null;
+    const state  = addr.state || addr.province || null;
+    const country = addr.country_code?.toUpperCase();
+
+    let name;
+    if (region && state && region !== state) {
+      name = `${region}, ${state}`;
+    } else if (state) {
+      name = country === 'US' ? state : `${state}, ${country}`;
+    } else {
+      name = addr.country || `${lat.toFixed(1)}°, ${lng.toFixed(1)}°`;
+    }
+
     _geocodeCache.set(key, name);
     return name;
   } catch {
@@ -1097,8 +1108,9 @@ async function computeTopLocations(activities, limit = 10) {
     const p = pts.find(x => x.lat !== null && x.lng !== null);
     if (!p) continue;
 
-    const cellLat = Math.round(p.lat * 2) / 2;
-    const cellLng = Math.round(p.lng * 2) / 2;
+    // ~2° grid cell (~220km) — wide enough to cluster a metro region together
+    const cellLat = Math.round(p.lat * 0.5) / 0.5;
+    const cellLng = Math.round(p.lng * 0.5) / 0.5;
     const key = `${cellLat},${cellLng}`;
 
     counts.set(key, (counts.get(key) || 0) + 1);

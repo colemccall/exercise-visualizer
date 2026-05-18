@@ -18,20 +18,21 @@
  *
  * @param {Activity[]} activities
  * @param {HTMLElement} container
- * @param {number} maxHR   User-specified max heart rate (default 190)
+ * @param {number} maxHR   Max heart rate threshold (default 200 — readings above are flagged as concerning)
  */
 
-export function renderHRZones(activities, container, maxHR = 190) {
+export function renderHRZones(activities, container, maxHR = 200) {
   container.innerHTML = '';
 
   // ── Zone definitions ──────────────────────────────────────────────────────
   const zones = [
-    { name: 'Zone 1', label: 'Rest',       min: 0,   max: 0.50, color: '#93c5fd' },
-    { name: 'Zone 2', label: 'Easy',       min: 0.50, max: 0.60, color: '#6ee7b7' },
-    { name: 'Zone 3', label: 'Moderate',   min: 0.60, max: 0.70, color: '#fde68a' },
-    { name: 'Zone 4', label: 'Hard',       min: 0.70, max: 0.80, color: '#fb923c' },
-    { name: 'Zone 5', label: 'Very Hard',  min: 0.80, max: 0.90, color: '#f87171' },
-    { name: 'Zone 6', label: 'Max',        min: 0.90, max: 1.00, color: '#c026d3' },
+    { name: 'Zone 1', label: 'Rest',        min: 0,    max: 0.50,  color: '#93c5fd', concerning: false },
+    { name: 'Zone 2', label: 'Easy',        min: 0.50, max: 0.60,  color: '#6ee7b7', concerning: false },
+    { name: 'Zone 3', label: 'Moderate',    min: 0.60, max: 0.70,  color: '#fde68a', concerning: false },
+    { name: 'Zone 4', label: 'Hard',        min: 0.70, max: 0.80,  color: '#fb923c', concerning: false },
+    { name: 'Zone 5', label: 'Very Hard',   min: 0.80, max: 0.90,  color: '#f87171', concerning: false },
+    { name: 'Zone 6', label: 'Max',         min: 0.90, max: 1.00,  color: '#c026d3', concerning: false },
+    { name: '⚠ Over', label: 'Concerning',  min: 1.00, max: Infinity, color: '#ff0044', concerning: true },
   ];
 
   // ── Collect all HR readings ───────────────────────────────────────────────
@@ -62,7 +63,6 @@ export function renderHRZones(activities, container, maxHR = 190) {
 
   for (const hr of hrReadings) {
     const pct = hr / maxHR;
-    // Find the zone this reading falls into (last zone catches >= 90%)
     let placed = false;
     for (let z = zones.length - 1; z >= 0; z--) {
       if (pct >= zones[z].min) {
@@ -71,7 +71,7 @@ export function renderHRZones(activities, container, maxHR = 190) {
         break;
       }
     }
-    if (!placed) zoneCounts[0]++; // below zone 1 minimum
+    if (!placed) zoneCounts[0]++;
   }
 
   const total = hrReadings.length;
@@ -121,8 +121,9 @@ export function renderHRZones(activities, container, maxHR = 190) {
     .attr('y', barH / 2 + 1)
     .attr('text-anchor', 'end')
     .attr('dominant-baseline', 'middle')
-    .attr('fill', 'var(--text-muted)')
+    .attr('fill', d => d.concerning ? '#ff0044' : 'var(--text-muted)')
     .style('font-size', '10px')
+    .style('font-weight', d => d.concerning ? '700' : '400')
     .text(d => `${d.name} ${d.label}`);
 
   // Background track
