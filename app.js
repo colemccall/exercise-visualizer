@@ -650,9 +650,9 @@ function applyHeatmapFilter(filtered) {
     if (!poly || !act) continue;
     const color = TYPE_COLORS[act.type] || TYPE_COLORS.Other;
     if (!hasFilter || filteredIds.has(act.id)) {
-      poly.setStyle({ color, weight: 2, opacity: 0.7 });
+      poly.setStyle({ color, weight: 1.5, opacity: 0.35 });
     } else {
-      poly.setStyle({ color, weight: 1, opacity: 0.12 });
+      poly.setStyle({ color, weight: 1, opacity: 0.07 });
     }
   }
 }
@@ -969,7 +969,7 @@ function tlStep() {
   // Flash in bright, then settle to normal visible opacity
   poly.setStyle({ color: '#ffffff', weight: 4, opacity: 1 });
   setTimeout(() => {
-    poly.setStyle({ color, weight: 2, opacity: 0.7 });
+    poly.setStyle({ color, weight: 1.5, opacity: 0.35 });
   }, 300);
 
   tlUpdateUI(tlIdx);
@@ -1044,7 +1044,7 @@ export function tlStop() {
   for (let i = 0; i < _renderedPolylines.length; i++) {
     const act = _renderedActivities[i];
     const color = TYPE_COLORS[act?.type] || TYPE_COLORS.Other;
-    _renderedPolylines[i]?.setStyle({ color, weight: 2, opacity: 0.6 });
+    _renderedPolylines[i]?.setStyle({ color, weight: 1.5, opacity: 0.35 });
   }
 }
 
