@@ -52,6 +52,7 @@ const filters = {
   from: null,
   to: null,
   search: '',
+  duplicatesOnly: false,
 };
 
 /** Leaflet heatmap instance */
@@ -61,95 +62,141 @@ let heatmapInstance = null;
 let detailRouteMap = null;
 
 // ═════════════════════════════════════════════════════════════════════════════
-// UPLOAD HANDLING
+// UPLOAD HANDLING — stage files per source, parse all on "Go"
 // ═════════════════════════════════════════════════════════════════════════════
 
 const SOURCES = ['strava', 'apple', 'garmin'];
 const PARSERS = { strava: parseStrava, apple: parseApple, garmin: parseGarmin };
 
+/** Staged (not yet parsed) files per source */
+const stagedFiles = { strava: [], apple: [], garmin: [] };
+
 function setupUploadZone(source) {
   const zone  = document.getElementById(`zone-${source}`);
   const input = document.getElementById(`file-${source}`);
 
-  // Click on zone body (not the label or details) → trigger file input
   zone.addEventListener('click', (e) => {
     if (e.target.closest('details')) return;
-    if (e.target.closest('label')) return; // label already handles the click natively
+    if (e.target.closest('label')) return;
     input.click();
   });
 
-  // File input change
   input.addEventListener('change', () => {
-    if (input.files.length > 0) {
-      handleFiles(source, Array.from(input.files));
-    }
+    if (input.files.length > 0) stageFiles(source, Array.from(input.files));
   });
 
-  // Drag and drop
   zone.addEventListener('dragover', (e) => {
     e.preventDefault();
-    zone.style.borderColor = 'var(--accent)';
-    zone.style.background  = 'var(--accent-light)';
+    zone.classList.add('drag-over');
   });
-
-  zone.addEventListener('dragleave', () => {
-    zone.style.borderColor = '';
-    zone.style.background  = '';
-  });
-
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
   zone.addEventListener('drop', (e) => {
     e.preventDefault();
-    zone.style.borderColor = '';
-    zone.style.background  = '';
+    zone.classList.remove('drag-over');
     const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) handleFiles(source, files);
+    if (files.length > 0) stageFiles(source, files);
   });
 }
 
-async function handleFiles(source, files) {
+function stageFiles(source, files) {
+  stagedFiles[source] = files;
+  updateZoneUI(source);
+  updateGoButton();
+}
+
+function updateZoneUI(source) {
+  const files = stagedFiles[source];
   const zone  = document.getElementById(`zone-${source}`);
   const sub   = document.getElementById(`sub-${source}`);
+  const fileList = document.getElementById(`filelist-${source}`);
 
-  showProgress(0, `Reading ${source} files…`);
-
-  const parser = PARSERS[source];
-  let newActivities = [];
-
-  try {
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const pct  = Math.round((i / files.length) * 90);
-      const partial = await parser(file, (p, label) => {
-        showProgress(pct + Math.round(p * 0.9), label);
-      });
-      newActivities = newActivities.concat(partial);
+  if (files.length > 0) {
+    zone.classList.add('staged');
+    zone.classList.remove('loaded');
+    sub.textContent = files.length === 1 ? files[0].name : `${files.length} files selected`;
+    if (fileList) {
+      fileList.innerHTML = files.map(f =>
+        `<div class="staged-file">&#128196; ${escapeHtml(f.name)}</div>`
+      ).join('');
     }
-  } catch (err) {
-    console.error(`Error parsing ${source} files:`, err);
-    showToast(`Error loading ${source} data: ${err.message}`);
-    hideProgress();
-    return;
+  } else {
+    zone.classList.remove('staged', 'loaded');
+    sub.textContent = source === 'strava' ? 'Choose ZIP file' : 'Choose file';
+    if (fileList) fileList.innerHTML = '';
+  }
+}
+
+function updateGoButton() {
+  const total = SOURCES.reduce((n, s) => n + stagedFiles[s].length, 0);
+  const btn   = document.getElementById('btn-go');
+  const count = document.getElementById('go-file-count');
+  if (!btn) return;
+
+  if (total > 0) {
+    btn.disabled = false;
+    btn.classList.add('ready');
+    const srcNames = SOURCES.filter(s => stagedFiles[s].length > 0)
+      .map(s => `${stagedFiles[s].length} ${s}`).join(', ');
+    if (count) count.textContent = srcNames;
+  } else {
+    btn.disabled = true;
+    btn.classList.remove('ready');
+    if (count) count.textContent = '';
+  }
+}
+
+async function parseAllStaged() {
+  const btn = document.getElementById('btn-go');
+  if (btn) btn.disabled = true;
+
+  const sourcesToParse = SOURCES.filter(s => stagedFiles[s].length > 0);
+  if (sourcesToParse.length === 0) return;
+
+  showProgress(0, 'Starting…');
+
+  let totalNew = 0;
+  const errors = [];
+
+  for (let si = 0; si < sourcesToParse.length; si++) {
+    const source = sourcesToParse[si];
+    const files  = stagedFiles[source];
+    const parser = PARSERS[source];
+    const baseProgress = Math.round((si / sourcesToParse.length) * 90);
+    const sliceSize    = Math.round(90 / sourcesToParse.length);
+
+    let newActivities = [];
+
+    try {
+      for (let fi = 0; fi < files.length; fi++) {
+        const partial = await parser(files[fi], (p, label) => {
+          showProgress(baseProgress + Math.round((p / 100) * sliceSize), label);
+        });
+        newActivities = newActivities.concat(partial);
+      }
+    } catch (err) {
+      console.error(`Error parsing ${source}:`, err);
+      errors.push(`${source}: ${err.message}`);
+      continue;
+    }
+
+    allActivities = allActivities.filter(a => a.source !== source);
+    allActivities = allActivities.concat(newActivities);
+    totalNew += newActivities.length;
+
+    // Mark zone as loaded
+    document.getElementById(`zone-${source}`)?.classList.replace('staged', 'loaded');
+    document.getElementById(`sub-${source}`).textContent = `${newActivities.length} loaded`;
   }
 
-  showProgress(95, `Merging ${newActivities.length} activities…`);
-
-  // Add to master list (removing old activities from this source)
-  allActivities = allActivities.filter(a => a.source !== source);
-  allActivities = allActivities.concat(newActivities);
-
-  // Deduplicate
+  showProgress(95, 'Checking for duplicates…');
   flagDuplicates(allActivities);
 
   showProgress(100, 'Done!');
   setTimeout(hideProgress, 600);
 
-  // Mark zone as loaded
-  zone.classList.add('loaded');
-  sub.textContent = `${newActivities.length} loaded`;
+  if (errors.length) showToast(`Errors: ${errors.join('; ')}`);
+  else showToast(`Loaded ${totalNew.toLocaleString()} activities`);
 
-  showToast(`Loaded ${newActivities.length} ${source} activities`);
-
-  // Switch to dashboard
   showDashboard();
 }
 
@@ -169,15 +216,16 @@ async function handleFiles(source, files) {
 function flagDuplicates(activities) {
   const MS_5_MIN = 5 * 60 * 1000;
 
-  // Reset all flags first
-  for (const a of activities) a.has_duplicate = false;
+  for (const a of activities) {
+    a.has_duplicate = false;
+    a.duplicate_of  = null; // id of the activity it clashes with
+  }
 
   for (let i = 0; i < activities.length; i++) {
     for (let j = i + 1; j < activities.length; j++) {
       const a = activities[i];
       const b = activities[j];
 
-      // Only flag cross-source duplicates
       if (a.source === b.source) continue;
       if (!a.date || !b.date) continue;
 
@@ -188,16 +236,32 @@ function flagDuplicates(activities) {
       const distB = b.distance_m;
       if (distA === 0 && distB === 0) continue;
 
-      const larger  = Math.max(distA, distB);
-      const smaller = Math.min(distA, distB);
+      const larger    = Math.max(distA, distB);
+      const smaller   = Math.min(distA, distB);
       const distRatio = larger > 0 ? (larger - smaller) / larger : 0;
 
       if (distRatio <= 0.05) {
         a.has_duplicate = true;
         b.has_duplicate = true;
+        if (!a.duplicate_of) a.duplicate_of = b.id;
+        if (!b.duplicate_of) b.duplicate_of = a.id;
       }
     }
   }
+}
+
+function getDuplicateCount() {
+  // Count unique pairs, not individual flagged activities
+  const seen = new Set();
+  let pairs = 0;
+  for (const a of allActivities) {
+    if (a.has_duplicate && a.duplicate_of && !seen.has(a.id) && !seen.has(a.duplicate_of)) {
+      seen.add(a.id);
+      seen.add(a.duplicate_of);
+      pairs++;
+    }
+  }
+  return pairs;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -220,6 +284,7 @@ function getFilteredActivities() {
         if (a.date > toEnd) return false;
       }
       if (term && !a.name.toLowerCase().includes(term) && !a.type.toLowerCase().includes(term)) return false;
+      if (filters.duplicatesOnly && !a.has_duplicate) return false;
       return true;
     })
     .sort((a, b) => b.date - a.date);
@@ -294,12 +359,30 @@ function showDashboard() {
   dash.classList.add('visible');
 
   refreshDashboard();
+  showDuplicateBanner();
 
-  // Leaflet measures container size at init time — if the container was hidden,
-  // it gets 0×0 and tiles never render. Force a resize after the DOM paints.
   setTimeout(() => {
     if (heatmapInstance) heatmapInstance.invalidateSize();
   }, 150);
+}
+
+function showDuplicateBanner() {
+  const banner = document.getElementById('duplicate-banner');
+  if (!banner) return;
+
+  const pairs = getDuplicateCount();
+  if (pairs === 0) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  banner.style.display = 'flex';
+  document.getElementById('dup-count').textContent = pairs;
+}
+
+function dismissDuplicateBanner() {
+  const banner = document.getElementById('duplicate-banner');
+  if (banner) banner.style.display = 'none';
 }
 
 function refreshDashboard() {
@@ -388,7 +471,7 @@ function renderActivityList(activities) {
         <div class="activity-dur">${formatDuration(activity.duration_s)}</div>
       </div>
       <span class="activity-source-badge ${activity.source}">${activity.source}</span>
-      ${activity.has_duplicate ? '<span class="duplicate-badge">⚠ Possible duplicate</span>' : ''}
+      ${activity.has_duplicate ? dupBadge(activity) : ''}
     `;
 
     row.addEventListener('click', () => openDetail(activity));
@@ -564,8 +647,27 @@ function setUnits(newUnits) {
 
 document.addEventListener('DOMContentLoaded', () => {
 
-  // Upload zones
+  // Upload zones + Go button
   SOURCES.forEach(setupUploadZone);
+  SOURCES.forEach(s => updateZoneUI(s));
+  updateGoButton();
+
+  document.getElementById('btn-go')?.addEventListener('click', parseAllStaged);
+
+  // Duplicate banner
+  document.getElementById('btn-dup-review')?.addEventListener('click', () => {
+    filters.duplicatesOnly = true;
+    document.getElementById('filter-dup-only').checked = true;
+    dismissDuplicateBanner();
+    refreshDashboard();
+  });
+  document.getElementById('btn-dup-dismiss')?.addEventListener('click', dismissDuplicateBanner);
+
+  // Duplicates filter checkbox
+  document.getElementById('filter-dup-only')?.addEventListener('change', (e) => {
+    filters.duplicatesOnly = e.target.checked;
+    refreshDashboard();
+  });
 
   // Unit toggle
   document.getElementById('btn-metric').addEventListener('click',   () => setUnits('metric'));
@@ -604,14 +706,17 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-clear-filters').addEventListener('click', () => {
-    filters.type   = 'All';
-    filters.from   = null;
-    filters.to     = null;
-    filters.search = '';
-    document.getElementById('filter-type').value   = 'All';
-    document.getElementById('filter-from').value   = '';
-    document.getElementById('filter-to').value     = '';
-    document.getElementById('filter-search').value = '';
+    filters.type           = 'All';
+    filters.from           = null;
+    filters.to             = null;
+    filters.search         = '';
+    filters.duplicatesOnly = false;
+    document.getElementById('filter-type').value       = 'All';
+    document.getElementById('filter-from').value       = '';
+    document.getElementById('filter-to').value         = '';
+    document.getElementById('filter-search').value     = '';
+    const cb = document.getElementById('filter-dup-only');
+    if (cb) cb.checked = false;
     refreshDashboard();
   });
 
@@ -649,6 +754,14 @@ document.addEventListener('DOMContentLoaded', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 // UTILITIES
 // ═════════════════════════════════════════════════════════════════════════════
+
+function dupBadge(activity) {
+  const other = activity.duplicate_of
+    ? allActivities.find(a => a.id === activity.duplicate_of)
+    : null;
+  const label = other ? `⚠ Also in ${other.source}` : '⚠ Duplicate';
+  return `<span class="duplicate-badge" title="This activity appears in multiple sources">${label}</span>`;
+}
 
 function escapeHtml(str) {
   return String(str)

@@ -93,6 +93,125 @@
       margin-bottom: var(--sp-1);
     }
 
+    /* Staged file list inside upload zone */
+    .staged-file-list {
+      margin-top: var(--sp-2);
+      width: 100%;
+      text-align: left;
+    }
+    .staged-file {
+      font-size: 10px;
+      color: var(--text-mid);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding: 1px 0;
+    }
+    .bs-upload-zone.staged {
+      border-style: solid;
+      border-color: var(--accent);
+      background: var(--accent-light);
+    }
+    .bs-upload-zone.drag-over {
+      border-color: var(--accent);
+      background: var(--accent-light);
+    }
+
+    /* Go button row */
+    .go-row {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: var(--sp-3);
+      margin-top: var(--sp-4);
+    }
+    .go-file-summary {
+      font-size: 12px;
+      color: var(--text-muted);
+      flex: 1;
+    }
+    .go-btn {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 12px 36px;
+      border: none;
+      border-radius: var(--radius-md);
+      background: var(--border);
+      color: var(--text-muted);
+      cursor: not-allowed;
+      transition: background 0.2s, color 0.2s, transform 0.1s, box-shadow 0.2s;
+    }
+    .go-btn.ready {
+      background: linear-gradient(135deg, var(--grad-a), var(--grad-b));
+      color: #fff;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(220,38,38,0.35);
+    }
+    .go-btn.ready:hover { opacity: 0.9; transform: translateY(-2px); box-shadow: 0 6px 28px rgba(220,38,38,0.45); }
+    .go-btn.ready:active { transform: translateY(0); }
+
+    /* Duplicate banner */
+    #duplicate-banner {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      padding: var(--sp-3) var(--sp-6);
+      background: #fefce8;
+      border-bottom: 1px solid #fde68a;
+      color: #92400e;
+      font-size: 13px;
+    }
+    html.dark-mode #duplicate-banner {
+      background: #2a1f00;
+      border-color: #5a4200;
+      color: #fbbf24;
+    }
+    .dup-icon { font-size: 18px; flex-shrink: 0; }
+    .dup-text { flex: 1; }
+    .dup-btn-review {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: var(--radius-sm);
+      border: 1.5px solid currentColor;
+      background: transparent;
+      color: #92400e;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.12s;
+      flex-shrink: 0;
+    }
+    html.dark-mode .dup-btn-review { color: #fbbf24; }
+    .dup-btn-review:hover { background: rgba(0,0,0,0.08); }
+    .dup-btn-dismiss {
+      font-size: 18px;
+      line-height: 1;
+      background: none;
+      border: none;
+      color: inherit;
+      opacity: 0.5;
+      cursor: pointer;
+      padding: 0 var(--sp-1);
+      flex-shrink: 0;
+    }
+    .dup-btn-dismiss:hover { opacity: 1; }
+
+    /* Duplicates filter */
+    .dup-filter-label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--warn);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .dup-filter-label input { accent-color: var(--warn); cursor: pointer; }
+
     /* Progress bar */
     #progress-container {
       padding: 0 var(--sp-6) var(--sp-4);
@@ -703,7 +822,7 @@
           <div class="bs-upload-icon">&#129984;</div>
           <div class="bs-upload-name">Strava</div>
           <label for="file-strava" class="upload-choose-btn" id="sub-strava">Choose ZIP file</label>
-          <div class="bs-upload-sub" style="margin-top:2px;">export.zip &bull; activities.csv &bull; .gpx</div>
+          <div id="filelist-strava" class="staged-file-list"></div>
           <details class="how-to-export" style="margin-top:var(--sp-3); text-align:left;">
             <summary>How to get your Strava export</summary>
             <div class="export-body">
@@ -713,7 +832,7 @@
                 <li>Click "Request Your Archive" &mdash; you&rsquo;ll get an email with a link</li>
                 <li>Download the <strong>ZIP file</strong> and upload it here</li>
               </ol>
-              <p style="margin-top:8px;color:var(--text-muted);">Note: Strava exports most activities as .fit files (no map). Only activities with .gpx files will show on the heatmap.</p>
+              <p style="margin-top:8px;color:var(--text-muted);">Note: Only activities with .gpx files will show on the heatmap.</p>
             </div>
           </details>
         </div>
@@ -724,7 +843,7 @@
           <div class="bs-upload-icon">&#127822;</div>
           <div class="bs-upload-name">Apple Watch</div>
           <label for="file-apple" class="upload-choose-btn" id="sub-apple">Choose file</label>
-          <div class="bs-upload-sub" style="margin-top:2px;">or drag &amp; drop</div>
+          <div id="filelist-apple" class="staged-file-list"></div>
           <details class="how-to-export" style="margin-top:var(--sp-3); text-align:left;">
             <summary>How to export</summary>
             <div class="export-body">
@@ -744,7 +863,7 @@
           <div class="bs-upload-icon">&#128309;</div>
           <div class="bs-upload-name">Garmin</div>
           <label for="file-garmin" class="upload-choose-btn" id="sub-garmin">Choose file</label>
-          <div class="bs-upload-sub" style="margin-top:2px;">or drag &amp; drop</div>
+          <div id="filelist-garmin" class="staged-file-list"></div>
           <details class="how-to-export" style="margin-top:var(--sp-3); text-align:left;">
             <summary>How to export</summary>
             <div class="export-body">
@@ -759,6 +878,14 @@
         </div>
 
       </div><!-- /.bs-upload-zones -->
+
+      <!-- Go button -->
+      <div class="go-row">
+        <div class="go-file-summary" id="go-file-count"></div>
+        <button class="go-btn" id="btn-go" disabled>
+          Analyze &rarr;
+        </button>
+      </div>
 
       <!-- Progress bar -->
       <div id="progress-container" style="margin-top:var(--sp-4);">
@@ -802,6 +929,17 @@
         <button id="btn-imperial">mi</button>
       </div>
       <button class="tl-btn" id="btn-theme-toggle" style="margin-left:auto;">🌙 Dark</button>
+    </div>
+
+    <!-- Duplicate banner (hidden until duplicates found) -->
+    <div id="duplicate-banner" style="display:none;">
+      <span class="dup-icon">&#9888;</span>
+      <span class="dup-text">
+        <strong><span id="dup-count">0</span> possible duplicate pairs</strong> found across your sources.
+        Same activity recorded by multiple devices will appear twice.
+      </span>
+      <button class="dup-btn-review" id="btn-dup-review">Review duplicates</button>
+      <button class="dup-btn-dismiss" id="btn-dup-dismiss">&times;</button>
     </div>
 
     <!-- Hero heatmap — full width -->
@@ -877,6 +1015,10 @@
       <input type="date" id="filter-from" />
       <label>To</label>
       <input type="date" id="filter-to" />
+      <label class="dup-filter-label">
+        <input type="checkbox" id="filter-dup-only" />
+        Duplicates only
+      </label>
       <button class="bs-btn-ghost bs-btn" id="btn-clear-filters" style="font-size:12px;">Clear</button>
     </div>
 
