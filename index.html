@@ -1,0 +1,764 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fitness Activity Visualizer</title>
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Design System -->
+  <link rel="stylesheet" href="./design-system/theme.css" />
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <style>
+    /* â”€â”€ App shell â”€â”€ */
+    body {
+      background: var(--surface);
+      min-height: 100vh;
+    }
+
+    .app-wrapper {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: var(--sp-6);
+    }
+
+    /* â”€â”€ Upload screen â”€â”€ */
+    #upload-screen {
+      max-width: 700px;
+      margin: 40px auto;
+    }
+
+    .upload-instructions {
+      padding: var(--sp-5) var(--sp-6);
+    }
+
+    details.how-to-export {
+      margin-top: var(--sp-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+    details.how-to-export summary {
+      padding: var(--sp-2) var(--sp-3);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--surface);
+      list-style: none;
+      user-select: none;
+    }
+    details.how-to-export summary::-webkit-details-marker { display: none; }
+    details.how-to-export summary::before { content: 'â–¶ '; font-size: 10px; }
+    details.how-to-export[open] summary::before { content: 'â–¼ '; }
+    details.how-to-export .export-body {
+      padding: var(--sp-3);
+      font-size: 12px;
+      color: var(--text-mid);
+      line-height: 1.6;
+      background: var(--bg);
+    }
+    details.how-to-export .export-body ol {
+      padding-left: var(--sp-5);
+    }
+    details.how-to-export .export-body li {
+      margin-bottom: var(--sp-1);
+    }
+
+    /* Progress bar */
+    #progress-container {
+      padding: 0 var(--sp-6) var(--sp-4);
+      display: none;
+    }
+    #progress-container.visible { display: block; }
+    .progress-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: var(--sp-2);
+    }
+    .progress-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--grad-a), var(--grad-b));
+      border-radius: 3px;
+      transition: width 0.2s ease;
+      width: 0%;
+    }
+
+    /* â”€â”€ Dashboard â”€â”€ */
+    #dashboard-screen { display: none; }
+    #dashboard-screen.visible { display: block; }
+
+    /* Header controls row */
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      flex-wrap: wrap;
+      padding: var(--sp-3) var(--sp-6) var(--sp-4);
+    }
+
+    .source-badges {
+      display: flex;
+      gap: var(--sp-2);
+      flex: 1;
+    }
+
+    .source-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px var(--sp-2);
+      border-radius: 20px;
+      border: 1.5px solid currentColor;
+      opacity: 0.7;
+    }
+    .source-badge.strava  { color: #FC4C02; background: #fff3ef; }
+    .source-badge.apple   { color: #555; background: #f5f5f5; }
+    .source-badge.garmin  { color: #1565C0; background: #e8f0fe; }
+
+    .unit-toggle {
+      display: flex;
+      background: var(--surface-2);
+      border-radius: 20px;
+      padding: 2px;
+    }
+    .unit-toggle button {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .unit-toggle button.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    /* Stats bar */
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      padding: var(--sp-4) var(--sp-6);
+      gap: var(--sp-2);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Filter row */
+    .filter-row {
+      display: flex;
+      gap: var(--sp-3);
+      padding: var(--sp-3) var(--sp-6);
+      align-items: center;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--border);
+    }
+    .filter-row label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .filter-row select,
+    .filter-row input[type="date"] {
+      font-family: var(--font-body);
+      font-size: 12px;
+      padding: 5px 8px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .filter-row select:focus,
+    .filter-row input[type="date"]:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    /* Main split layout */
+    .main-split {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: var(--sp-4);
+      padding: var(--sp-4) var(--sp-6);
+    }
+
+    /* Heatmap */
+    #heatmap-container {
+      height: 480px;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    #heatmap { width: 100%; height: 100%; }
+
+    /* Activity list */
+    #activity-list-container {
+      height: 480px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .list-header {
+      padding: var(--sp-3) var(--sp-4);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    #activity-list {
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    /* Activity row */
+    .activity-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      padding: var(--sp-2) var(--sp-4);
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.12s;
+      position: relative;
+    }
+    .activity-row:hover { background: var(--surface); }
+    .activity-type-icon { font-size: 18px; flex-shrink: 0; }
+    .activity-info { flex: 1; min-width: 0; }
+    .activity-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .activity-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+    .activity-stats { text-align: right; flex-shrink: 0; }
+    .activity-dist {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .activity-dur {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .activity-source-badge {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 5px;
+      border-radius: 3px;
+      text-transform: uppercase;
+    }
+    .activity-source-badge.strava  { background: #fff3ef; color: #FC4C02; }
+    .activity-source-badge.apple   { background: #f5f5f5; color: #555; }
+    .activity-source-badge.garmin  { background: #e8f0fe; color: #1565C0; }
+
+    .duplicate-badge {
+      position: absolute;
+      top: 4px; right: 40px;
+      font-size: 9px;
+      background: var(--warn-bg);
+      color: var(--warn);
+      border: 1px solid #fcd34d;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-weight: 700;
+    }
+
+    /* Charts row */
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: var(--sp-4);
+      padding: 0 var(--sp-6) var(--sp-6);
+    }
+    .chart-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: var(--sp-4);
+    }
+    .chart-title {
+      font-family: var(--font-display);
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text);
+      margin-bottom: var(--sp-3);
+    }
+    .chart-card svg { width: 100%; }
+
+    /* HR zones max HR input */
+    .hr-input-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      margin-bottom: var(--sp-2);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .hr-input-row input {
+      width: 56px;
+      font-family: var(--font-body);
+      font-size: 12px;
+      padding: 3px 6px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      text-align: center;
+    }
+
+    /* â”€â”€ Activity Detail Modal â”€â”€ */
+    #detail-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 1000;
+      display: none;
+      align-items: flex-start;
+      justify-content: flex-end;
+    }
+    #detail-overlay.open { display: flex; }
+
+    #detail-panel {
+      width: 620px;
+      max-width: 100vw;
+      height: 100vh;
+      background: var(--bg);
+      overflow-y: auto;
+      box-shadow: -4px 0 40px rgba(0,0,0,0.2);
+      transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    #detail-overlay.open #detail-panel {
+      transform: translateX(0);
+    }
+
+    .detail-header {
+      background: linear-gradient(135deg, var(--grad-a), var(--grad-b));
+      padding: var(--sp-5) var(--sp-6);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+    .detail-title {
+      font-family: var(--font-display);
+      font-size: 22px;
+      font-weight: 800;
+      text-transform: uppercase;
+      color: #fff;
+      line-height: 1.1;
+    }
+    .detail-subtitle {
+      font-size: 12px;
+      color: rgba(255,255,255,0.65);
+      margin-top: 4px;
+    }
+    .detail-close {
+      background: rgba(255,255,255,0.15);
+      border: none;
+      color: #fff;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      font-size: 18px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    .detail-close:hover { background: rgba(255,255,255,0.3); }
+
+    #detail-route-map {
+      height: 300px;
+      background: var(--surface);
+    }
+
+    .detail-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      padding: var(--sp-4) var(--sp-6);
+      gap: var(--sp-3);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .detail-chart-section {
+      padding: var(--sp-4) var(--sp-6);
+      border-bottom: 1px solid var(--border);
+    }
+    .detail-chart-section:last-child { border-bottom: none; }
+
+    .loading-spinner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 80px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    /* Toast */
+    #bs-toast {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: #111122;
+      color: #fff;
+      font-family: var(--font-body);
+      font-size: 13px;
+      font-weight: 500;
+      padding: 11px 22px;
+      border-radius: var(--radius-md);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      z-index: 9999;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #bs-toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .main-split { grid-template-columns: 1fr; }
+      #activity-list-container { height: 360px; }
+      .charts-row { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 600px) {
+      .app-wrapper { padding: var(--sp-3); }
+      .stats-bar { grid-template-columns: repeat(2, 1fr); }
+      .header-controls { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body class="app-fitness">
+
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+     UPLOAD SCREEN
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<div class="app-wrapper">
+<div id="upload-screen">
+  <div class="bs-card">
+
+    <!-- Header -->
+    <div class="bs-header">
+      <div class="bs-header-top">
+        <div>
+          <div class="bs-logo">ðŸƒ Fitness</div>
+          <div class="bs-logo-sub">Activity Visualizer â€” All processing happens in your browser</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Privacy notice -->
+    <div class="bs-privacy" style="margin-top: var(--sp-5);">
+      <strong>ðŸ”’ 100% Private:</strong> Your fitness data is processed entirely in your browser.
+      No files are uploaded to any server. Your data never leaves your device.
+    </div>
+
+    <!-- Upload zones -->
+    <div class="upload-instructions">
+      <div class="bs-display-md" style="margin-bottom:var(--sp-4); color:var(--text);">
+        Load Your Activity Data
+      </div>
+
+      <div class="bs-upload-zones" id="upload-zones">
+
+        <!-- Strava -->
+        <div class="bs-upload-zone" id="zone-strava" data-source="strava">
+          <input type="file" id="file-strava" accept=".zip,.csv,.gpx" style="display:none" multiple />
+          <div class="bs-upload-icon">ðŸŸ </div>
+          <div class="bs-upload-name">Strava</div>
+          <div class="bs-upload-sub" id="sub-strava">Drop ZIP or CSV + GPX files</div>
+          <details class="how-to-export" style="margin-top:var(--sp-3); text-align:left;">
+            <summary>How to export</summary>
+            <div class="export-body">
+              <ol>
+                <li>Go to <strong>strava.com</strong> â†’ Settings â†’ My Account</li>
+                <li>Scroll to "Download or Delete Your Account"</li>
+                <li>Click "Request Your Archive" and wait for an email</li>
+                <li>Download the ZIP file and drop it here, or drop the <code>activities.csv</code> file directly</li>
+              </ol>
+            </div>
+          </details>
+        </div>
+
+        <!-- Apple Health -->
+        <div class="bs-upload-zone" id="zone-apple" data-source="apple">
+          <input type="file" id="file-apple" accept=".zip,.xml" style="display:none" multiple />
+          <div class="bs-upload-icon">ðŸŽ</div>
+          <div class="bs-upload-name">Apple Watch</div>
+          <div class="bs-upload-sub" id="sub-apple">Drop Health export ZIP or XML</div>
+          <details class="how-to-export" style="margin-top:var(--sp-3); text-align:left;">
+            <summary>How to export</summary>
+            <div class="export-body">
+              <ol>
+                <li>Open the <strong>Health app</strong> on your iPhone</li>
+                <li>Tap your profile picture (top right)</li>
+                <li>Tap "Export All Health Data"</li>
+                <li>Share the resulting ZIP file to your computer and drop it here</li>
+              </ol>
+            </div>
+          </details>
+        </div>
+
+        <!-- Garmin -->
+        <div class="bs-upload-zone" id="zone-garmin" data-source="garmin">
+          <input type="file" id="file-garmin" accept=".zip,.json,.gpx" style="display:none" multiple />
+          <div class="bs-upload-icon">ðŸ”µ</div>
+          <div class="bs-upload-name">Garmin</div>
+          <div class="bs-upload-sub" id="sub-garmin">Drop Garmin Connect ZIP or JSON</div>
+          <details class="how-to-export" style="margin-top:var(--sp-3); text-align:left;">
+            <summary>How to export</summary>
+            <div class="export-body">
+              <ol>
+                <li>Go to <strong>connect.garmin.com</strong></li>
+                <li>Click your name â†’ Account Settings â†’ Data Management</li>
+                <li>Under "Export Your Data" click "Request Data Export"</li>
+                <li>Wait for an email with a download link, then drop the ZIP here</li>
+              </ol>
+            </div>
+          </details>
+        </div>
+
+      </div><!-- /.bs-upload-zones -->
+
+      <!-- Progress bar -->
+      <div id="progress-container" style="margin-top:var(--sp-4);">
+        <div class="progress-label" id="progress-label">Parsing filesâ€¦</div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+      </div>
+
+    </div><!-- /.upload-instructions -->
+
+  </div><!-- /.bs-card -->
+</div><!-- /#upload-screen -->
+
+
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+     DASHBOARD SCREEN
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<div id="dashboard-screen">
+  <div class="bs-card" style="margin-bottom:var(--sp-4);">
+
+    <!-- Header -->
+    <div class="bs-header">
+      <div class="bs-header-top">
+        <div>
+          <div class="bs-logo">ðŸƒ Fitness</div>
+          <div class="bs-logo-sub">Activity Visualizer</div>
+        </div>
+        <div class="bs-badges" id="dash-source-badges"></div>
+      </div>
+    </div>
+
+    <!-- Controls row -->
+    <div class="header-controls">
+      <button class="bs-btn bs-btn-secondary" id="btn-new-upload" style="font-size:12px; padding:6px 14px;">
+        + New Upload
+      </button>
+      <div class="unit-toggle">
+        <button id="btn-metric" class="active">km</button>
+        <button id="btn-imperial">mi</button>
+      </div>
+    </div>
+
+    <!-- Stats bar -->
+    <div class="stats-bar">
+      <div class="bs-stat">
+        <div class="bs-stat-num" id="stat-total">â€”</div>
+        <div class="bs-stat-lbl">Activities</div>
+      </div>
+      <div class="bs-stat">
+        <div class="bs-stat-num" id="stat-distance">â€”</div>
+        <div class="bs-stat-lbl">Total Distance</div>
+      </div>
+      <div class="bs-stat">
+        <div class="bs-stat-num" id="stat-elevation">â€”</div>
+        <div class="bs-stat-lbl">Elevation Gain</div>
+      </div>
+      <div class="bs-stat">
+        <div class="bs-stat-num" id="stat-range">â€”</div>
+        <div class="bs-stat-lbl">Date Range</div>
+      </div>
+    </div>
+
+    <!-- Filter row -->
+    <div class="filter-row">
+      <label>Type</label>
+      <select id="filter-type">
+        <option value="All">All</option>
+        <option value="Run">Run</option>
+        <option value="Ride">Ride</option>
+        <option value="Walk">Walk</option>
+        <option value="Hike">Hike</option>
+        <option value="Swim">Swim</option>
+        <option value="Other">Other</option>
+      </select>
+      <label>From</label>
+      <input type="date" id="filter-from" />
+      <label>To</label>
+      <input type="date" id="filter-to" />
+      <button class="bs-btn-ghost bs-btn" id="btn-clear-filters" style="font-size:12px;">Clear</button>
+    </div>
+
+    <!-- Main split: map + list -->
+    <div class="main-split">
+
+      <!-- Heatmap -->
+      <div>
+        <div class="chart-title" style="margin-bottom:var(--sp-2);">Route Heatmap</div>
+        <div id="heatmap-container">
+          <div id="heatmap"></div>
+        </div>
+      </div>
+
+      <!-- Activity list -->
+      <div id="activity-list-container">
+        <div class="list-header">Recent Activities</div>
+        <div id="activity-list"></div>
+      </div>
+
+    </div><!-- /.main-split -->
+
+    <!-- Charts row -->
+    <div class="charts-row">
+
+      <div class="chart-card">
+        <div class="chart-title">Distance Over Time</div>
+        <div id="chart-distance"></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-title">Weekly Activity</div>
+        <div id="chart-weekly"></div>
+      </div>
+
+      <div class="chart-card" id="chart-hr-card" style="display:none;">
+        <div class="chart-title">HR Zones</div>
+        <div class="hr-input-row">
+          <label for="input-max-hr">Max HR:</label>
+          <input type="number" id="input-max-hr" value="190" min="120" max="220" />
+          <span>bpm</span>
+        </div>
+        <div id="chart-hr-zones"></div>
+      </div>
+
+    </div><!-- /.charts-row -->
+
+  </div><!-- /.bs-card -->
+</div><!-- /#dashboard-screen -->
+</div><!-- /.app-wrapper -->
+
+
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+     ACTIVITY DETAIL PANEL (slide-in)
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<div id="detail-overlay">
+  <div id="detail-panel">
+
+    <div class="detail-header">
+      <div>
+        <div class="detail-title" id="detail-name">Activity</div>
+        <div class="detail-subtitle" id="detail-meta"></div>
+      </div>
+      <button class="detail-close" id="btn-close-detail">âœ•</button>
+    </div>
+
+    <!-- Route map -->
+    <div id="detail-route-map"></div>
+
+    <!-- Stats grid -->
+    <div class="detail-stats">
+      <div class="bs-stat">
+        <div class="bs-stat-num" id="dstat-distance">â€”</div>
+        <div class="bs-stat-lbl">Distance</div>
+      </div>
+      <div class="bs-stat">
+        <div class="bs-stat-num" id="dstat-duration">â€”</div>
+        <div class="bs-stat-lbl">Duration</div>
+      </div>
+      <div class="bs-stat">
+        <div class="bs-stat-num" id="dstat-pace">â€”</div>
+        <div class="bs-stat-lbl">Avg Pace</div>
+      </div>
+      <div class="bs-stat">
+        <div class="bs-stat-num" id="dstat-elevation">â€”</div>
+        <div class="bs-stat-lbl">Elev Gain</div>
+      </div>
+      <div class="bs-stat">
+        <div class="bs-stat-num" id="dstat-avg-hr">â€”</div>
+        <div class="bs-stat-lbl">Avg HR</div>
+      </div>
+      <div class="bs-stat">
+        <div class="bs-stat-num" id="dstat-max-hr">â€”</div>
+        <div class="bs-stat-lbl">Max HR</div>
+      </div>
+    </div>
+
+    <!-- Elevation chart -->
+    <div class="detail-chart-section" id="detail-elevation-section" style="display:none;">
+      <div class="chart-title">Elevation Profile</div>
+      <div id="detail-elevation-chart"></div>
+    </div>
+
+    <!-- HR over time chart -->
+    <div class="detail-chart-section" id="detail-hr-section" style="display:none;">
+      <div class="chart-title">Heart Rate</div>
+      <div id="detail-hr-chart"></div>
+    </div>
+
+  </div><!-- /#detail-panel -->
+</div><!-- /#detail-overlay -->
+
+
+<!-- Toast -->
+<div id="bs-toast"></div>
+
+
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+     EXTERNAL LIBRARIES (CDN)
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- JSZip -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<!-- App modules (ES modules) -->
+<script type="module" src="app.js"></script>
+</body>
+</html>
+

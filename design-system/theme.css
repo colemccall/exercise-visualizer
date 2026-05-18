@@ -1,0 +1,913 @@
+/* ═══════════════════════════════════════════════════════════════
+   BOLD SPORTS DESIGN SYSTEM
+   Shared CSS for all apps in the suite.
+
+   USAGE
+   ─────
+   1. Add the Google Fonts link to your <head>:
+      <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+   2. Link this file:
+      <link rel="stylesheet" href="path/to/theme.css">
+
+   3. Add an app class to your root element:
+      <body class="app-road-grid"> or <div class="bs-card app-highway">
+
+   4. Build components using the .bs-* classes below.
+
+   CUSTOMIZING PER APP
+   ───────────────────
+   Override only --grad-a, --grad-b, and --accent on the app class.
+   Everything else inherits from :root. See "App Themes" section.
+
+   CONTENTS
+   ────────
+   1. Design Tokens (CSS variables)
+   2. App Themes (per-app color overrides)
+   3. Reset & Base
+   4. Typography utilities
+   5. Layout (card shell, header)
+   6. Navigation (tabs, badges)
+   7. Puzzle / content area
+   8. Option buttons
+   9. Result panel
+   10. Stat grids
+   11. Fact box
+   12. Action buttons
+   13. Utility components (pills, cards, upload zones, analytics)
+   14. Animations
+   15. Toast notification
+═══════════════════════════════════════════════════════════════ */
+
+
+/* ─────────────────────────────────────────
+   1. DESIGN TOKENS
+───────────────────────────────────────── */
+:root {
+  /* Fonts */
+  --font-display: 'Barlow Condensed', sans-serif;
+  --font-body:    'Inter', sans-serif;
+
+  /* Neutral surface scale */
+  --bg:           #ffffff;
+  --surface:      #f7f7fb;
+  --surface-2:    #f0f0f6;
+  --border:       #e8e8f0;
+  --border-mid:   #d0d0e0;
+
+  /* Text scale */
+  --text:         #111122;
+  --text-mid:     #555566;
+  --text-muted:   #9999aa;
+
+  /* State — shared across all apps */
+  --correct:      #16a34a;
+  --correct-bg:   #f0fdf4;
+  --correct-bd:   #86efac;
+  --wrong:        #dc2626;
+  --wrong-bg:     #fef2f2;
+  --wrong-bd:     #fca5a5;
+  --warn:         #d97706;
+  --warn-bg:      #fffbeb;
+
+  /* Spacing scale */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-8:  32px;
+  --sp-10: 40px;
+
+  /* Radius scale */
+  --radius-sm:  6px;
+  --radius-md:  10px;
+  --radius-lg:  16px;
+
+  /* Shadow */
+  --shadow-card: 0 8px 40px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10);
+  --shadow-sm:   0 1px 4px rgba(0,0,0,0.08);
+
+  /* App accent — OVERRIDE these per app (see section 2) */
+  --grad-a:      #1E40AF;
+  --grad-b:      #6D28D9;
+  --accent:      #4F46E5;
+  --accent-light: #ede9fe;
+}
+
+
+/* ─────────────────────────────────────────
+   2. APP THEMES
+   Apply one class to your root element.
+   Only three variables change per app.
+───────────────────────────────────────── */
+
+/* Road Grid Guesser — Blue → Purple */
+.app-road-grid {
+  --grad-a:       #1E40AF;
+  --grad-b:       #6D28D9;
+  --accent:       #4F46E5;
+  --accent-light: #ede9fe;
+}
+
+/* Highway Trivia — Amber → Red */
+.app-highway {
+  --grad-a:       #B45309;
+  --grad-b:       #DC2626;
+  --accent:       #C2410C;
+  --accent-light: #fff7ed;
+}
+
+/* Stadium Bucket List — Forest → Navy */
+.app-stadium {
+  --grad-a:       #065F46;
+  --grad-b:       #1E40AF;
+  --accent:       #047857;
+  --accent-light: #ecfdf5;
+}
+
+/* Conference Realignment — Burgundy → Bronze */
+.app-realignment {
+  --grad-a:       #7C2D12;
+  --grad-b:       #92400E;
+  --accent:       #92400E;
+  --accent-light: #fef3c7;
+}
+
+/* Fitness Visualizer — Red → Orange */
+.app-fitness {
+  --grad-a:       #DC2626;
+  --grad-b:       #EA580C;
+  --accent:       #DC2626;
+  --accent-light: #fff1f2;
+}
+
+
+/* ─────────────────────────────────────────
+   3. RESET & BASE
+───────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+button {
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+
+img, svg {
+  display: block;
+  max-width: 100%;
+}
+
+
+/* ─────────────────────────────────────────
+   4. TYPOGRAPHY UTILITIES
+───────────────────────────────────────── */
+
+/* Display — Barlow Condensed, used for headers, verdicts, scores */
+.bs-display-xl  { font-family: var(--font-display); font-size: 36px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase; line-height: 1; }
+.bs-display-lg  { font-family: var(--font-display); font-size: 28px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1; }
+.bs-display-md  { font-family: var(--font-display); font-size: 22px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1.1; }
+.bs-display-sm  { font-family: var(--font-display); font-size: 16px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+
+/* Body — Inter */
+.bs-label       { font-size: 9px;  font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); }
+.bs-label-accent{ font-size: 9px;  font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.bs-body-sm     { font-size: 11px; font-weight: 400; color: var(--text-mid); line-height: 1.5; }
+.bs-body        { font-size: 13px; font-weight: 400; color: var(--text-mid); line-height: 1.55; }
+.bs-body-strong { font-size: 13px; font-weight: 600; color: var(--text); }
+
+
+/* ─────────────────────────────────────────
+   5. LAYOUT — CARD SHELL
+───────────────────────────────────────── */
+
+/* Main card wrapper — apply app theme class here */
+.bs-card {
+  background: var(--bg);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  width: 100%;
+}
+
+/* Full-bleed section divider */
+.bs-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0;
+}
+
+/* Padded content section */
+.bs-section {
+  padding: var(--sp-5) var(--sp-6);
+}
+.bs-section-sm {
+  padding: var(--sp-4) var(--sp-6);
+}
+
+
+/* ─────────────────────────────────────────
+   6. HEADER
+───────────────────────────────────────── */
+.bs-header {
+  background: linear-gradient(135deg, var(--grad-a) 0%, var(--grad-b) 100%);
+  padding: var(--sp-5) var(--sp-6) 0;
+}
+
+.bs-header-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+
+/* App name */
+.bs-logo {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  line-height: 1;
+}
+
+/* Subtitle below logo */
+.bs-logo-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.55);
+  margin-top: var(--sp-1);
+  letter-spacing: 0.02em;
+}
+
+/* Badge cluster (streak, best, count) */
+.bs-badges {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.bs-badge {
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-3);
+  text-align: center;
+  min-width: 52px;
+}
+.bs-badge .bs-badge-num {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1;
+  display: block;
+}
+.bs-badge .bs-badge-lbl {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255,255,255,0.45);
+  margin-top: 2px;
+  display: block;
+}
+
+/* Tab navigation inside header */
+.bs-tabs {
+  display: flex;
+}
+.bs-tab {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-3);
+  border: none;
+  background: transparent;
+  color: rgba(255,255,255,0.4);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.bs-tab.active {
+  color: #ffffff;
+  border-bottom-color: rgba(255,255,255,0.9);
+}
+.bs-tab:hover:not(.active) {
+  color: rgba(255,255,255,0.65);
+}
+
+
+/* ─────────────────────────────────────────
+   7. PUZZLE / CONTENT IMAGE AREA
+───────────────────────────────────────── */
+.bs-puzzle {
+  padding: var(--sp-5) var(--sp-6);
+}
+
+.bs-puzzle-img {
+  width: 100%;
+  height: 210px;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--sp-4);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Optional prompt label inside image (via data-prompt attr) */
+.bs-puzzle-img[data-prompt]::after {
+  content: attr(data-prompt);
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.04), transparent);
+  padding: 20px var(--sp-3) var(--sp-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+
+/* ─────────────────────────────────────────
+   8. OPTION BUTTONS (game choices)
+   2-column grid by default.
+   Use .bs-options-stack for single column.
+───────────────────────────────────────── */
+.bs-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2) + var(--sp-1);
+  gap: 10px;
+}
+
+.bs-options-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.bs-opt {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--surface);
+  border: 2px solid transparent;
+  color: var(--text);
+  padding: var(--sp-4) var(--sp-3) var(--sp-4) var(--sp-3);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
+}
+
+.bs-opt-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* Dot indicator on the left */
+.bs-opt-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-mid);
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+/* Arrow on the right */
+.bs-opt-arrow {
+  font-size: 15px;
+  color: var(--border-mid);
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+/* Hover state */
+.bs-opt:hover:not(:disabled) {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+.bs-opt:hover:not(:disabled) .bs-opt-dot  { background: var(--accent); }
+.bs-opt:hover:not(:disabled) .bs-opt-arrow { opacity: 1; color: var(--accent); }
+.bs-opt:active:not(:disabled) { transform: translateY(0); }
+
+/* Answer states */
+.bs-opt.correct {
+  background: var(--correct-bg);
+  border-color: var(--correct-bd);
+  color: var(--correct);
+}
+.bs-opt.correct .bs-opt-dot  { background: var(--correct); }
+.bs-opt.correct .bs-opt-arrow { opacity: 1; color: var(--correct); }
+
+.bs-opt.wrong {
+  background: var(--wrong-bg);
+  border-color: var(--wrong-bd);
+  color: var(--wrong);
+}
+.bs-opt.wrong .bs-opt-dot  { background: var(--wrong); }
+.bs-opt.wrong .bs-opt-arrow { opacity: 1; color: var(--wrong); }
+
+/* Reveal correct after wrong guess */
+.bs-opt.reveal {
+  background: var(--correct-bg);
+  border-color: var(--correct-bd);
+  color: var(--correct);
+}
+.bs-opt.reveal .bs-opt-dot  { background: var(--correct); }
+.bs-opt.reveal .bs-opt-arrow { opacity: 1; color: var(--correct); }
+
+.bs-opt:disabled { cursor: default; transform: none; }
+
+
+/* ─────────────────────────────────────────
+   9. RESULT PANEL
+   Shown after guess. Hidden by default.
+   Add .show to reveal.
+───────────────────────────────────────── */
+.bs-result {
+  display: none;
+}
+.bs-result.show {
+  display: block;
+}
+
+/* Gradient hero strip */
+.bs-result-hero {
+  background: linear-gradient(135deg, var(--grad-a), var(--grad-b));
+  padding: var(--sp-4) var(--sp-6);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.bs-result-verdict {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  line-height: 1;
+}
+.bs-result-sub {
+  font-size: 12px;
+  color: rgba(255,255,255,0.6);
+  margin-top: var(--sp-1);
+}
+.bs-result-emoji {
+  font-size: 34px;
+  line-height: 1;
+}
+
+/* Share text preview (monospace copyable string) */
+.bs-share-preview {
+  margin: var(--sp-4) var(--sp-6) 0;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-family: monospace;
+  line-height: 1.65;
+}
+
+
+/* ─────────────────────────────────────────
+   10. STAT GRIDS
+   Used in result panels and dashboard headers.
+───────────────────────────────────────── */
+.bs-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: var(--sp-4) var(--sp-6);
+  gap: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.bs-stats-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.bs-stats-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.bs-stat {
+  text-align: center;
+}
+.bs-stat-num {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+.bs-stat-lbl {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* Inline analytics tiles (used in Realignment, Fitness) */
+.bs-analytics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-6) var(--sp-4);
+}
+
+.bs-analytic {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3) var(--sp-3);
+}
+.bs-analytic-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: var(--sp-1);
+}
+.bs-analytic-value {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+.bs-analytic-delta {
+  font-size: 11px;
+  margin-top: 3px;
+}
+.bs-analytic-delta.up   { color: var(--correct); }
+.bs-analytic-delta.down { color: var(--wrong); }
+.bs-analytic-delta.flat { color: var(--text-muted); }
+.bs-analytic-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+
+/* ─────────────────────────────────────────
+   11. FACT BOX
+───────────────────────────────────────── */
+.bs-fact {
+  padding: var(--sp-4) var(--sp-6);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+}
+.bs-fact-icon {
+  width: 34px;
+  height: 34px;
+  background: var(--accent-light);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  flex-shrink: 0;
+}
+.bs-fact-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: var(--sp-1);
+}
+.bs-fact-text {
+  font-size: 13px;
+  color: var(--text-mid);
+  line-height: 1.55;
+}
+
+/* Privacy notice (Fitness app) */
+.bs-privacy {
+  margin: 0 var(--sp-6) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+.bs-privacy strong { color: var(--text-mid); }
+
+
+/* ─────────────────────────────────────────
+   12. ACTION BUTTONS
+───────────────────────────────────────── */
+.bs-actions {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-6) var(--sp-5);
+}
+
+/* Primary — gradient fill */
+.bs-btn {
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 700;
+  border: none;
+  padding: var(--sp-3) var(--sp-5);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  line-height: 1;
+}
+.bs-btn:hover  { opacity: 0.92; transform: translateY(-1px); }
+.bs-btn:active { transform: translateY(0); }
+
+.bs-btn-primary {
+  background: linear-gradient(135deg, var(--grad-a), var(--grad-b));
+  color: #ffffff;
+  flex: 1;
+}
+
+/* Secondary — outlined */
+.bs-btn-secondary {
+  background: none;
+  color: var(--text-muted);
+  border: 2px solid var(--border);
+  transition: border-color 0.15s, color 0.15s, transform 0.1s;
+}
+.bs-btn-secondary:hover {
+  border-color: var(--border-mid);
+  color: var(--text-mid);
+  opacity: 1;
+}
+
+/* Ghost — text only */
+.bs-btn-ghost {
+  background: none;
+  color: var(--accent);
+  padding-left: 0;
+  padding-right: 0;
+}
+.bs-btn-ghost:hover { opacity: 0.75; transform: none; }
+
+/* Danger */
+.bs-btn-danger {
+  background: var(--wrong-bg);
+  color: var(--wrong);
+  border: 1px solid var(--wrong-bd);
+}
+
+
+/* ─────────────────────────────────────────
+   13. UTILITY COMPONENTS
+
+   13a. Team / tag pills (Realignment)
+   13b. Stadium cards (Stadium List)
+   13c. Upload drop zones (Fitness)
+   13d. Conference columns (Realignment)
+───────────────────────────────────────── */
+
+/* 13a. PILLS */
+.bs-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.bs-pill {
+  font-size: 12px;
+  font-weight: 600;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: 20px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--text-mid);
+  cursor: grab;
+  user-select: none;
+  transition: border-color 0.15s, background 0.15s, color 0.15s, transform 0.12s;
+}
+.bs-pill:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-light);
+  transform: translateY(-1px);
+}
+.bs-pill:active { cursor: grabbing; transform: scale(0.96); }
+.bs-pill.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+/* Conference column header */
+.bs-conf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-2);
+}
+.bs-conf-name {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.bs-conf-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2px var(--sp-2);
+}
+
+/* 13b. STADIUM CARDS */
+.bs-card-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+}
+.bs-stadium-card {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-3);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  position: relative;
+}
+.bs-stadium-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+.bs-stadium-card.visited {
+  border-color: var(--correct-bd);
+  background: var(--correct-bg);
+}
+.bs-stadium-card.visited .bs-stadium-check { opacity: 1; }
+
+.bs-stadium-team    { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+.bs-stadium-name    { font-size: 11px; color: var(--text-muted); margin-bottom: var(--sp-1); }
+.bs-stadium-meta    { display: flex; align-items: center; justify-content: space-between; }
+.bs-stadium-conf    {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-light);
+  padding: 2px var(--sp-1);
+  border-radius: 20px;
+}
+.bs-stadium-card.visited .bs-stadium-conf {
+  color: var(--correct);
+  background: var(--correct-bg);
+}
+.bs-stadium-check   { opacity: 0; font-size: 14px; transition: opacity 0.2s; }
+
+/* 13c. UPLOAD DROP ZONES */
+.bs-upload-zones {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-2);
+}
+.bs-upload-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-4) var(--sp-2);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.bs-upload-zone:hover {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+.bs-upload-zone.loaded {
+  border-style: solid;
+  border-color: var(--correct-bd);
+  background: var(--correct-bg);
+}
+.bs-upload-icon { font-size: 22px; margin-bottom: var(--sp-1); }
+.bs-upload-name { font-size: 11px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+.bs-upload-sub  { font-size: 9px;  color: var(--text-muted); }
+.bs-upload-zone.loaded .bs-upload-sub { color: var(--correct); font-weight: 600; }
+
+
+/* ─────────────────────────────────────────
+   14. ANIMATIONS
+───────────────────────────────────────── */
+@keyframes bs-pop {
+  0%   { transform: scale(0.93); opacity: 0; }
+  60%  { transform: scale(1.04); }
+  100% { transform: scale(1);    opacity: 1; }
+}
+
+@keyframes bs-shake {
+  0%, 100% { transform: translateX(0); }
+  20%       { transform: translateX(-7px); }
+  40%       { transform: translateX(7px); }
+  60%       { transform: translateX(-4px); }
+  80%       { transform: translateX(4px); }
+}
+
+@keyframes bs-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes bs-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.bs-anim-pop      { animation: bs-pop      0.28s ease forwards; }
+.bs-anim-shake    { animation: bs-shake    0.36s ease forwards; }
+.bs-anim-fade-up  { animation: bs-fade-up  0.35s ease forwards; }
+.bs-anim-fade-in  { animation: bs-fade-in  0.2s  ease forwards; }
+
+
+/* ─────────────────────────────────────────
+   15. TOAST NOTIFICATION
+   Add #bs-toast to your HTML (once, at
+   body level). JS adds/removes .show.
+───────────────────────────────────────── */
+#bs-toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: #111122;
+  color: #ffffff;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 11px 22px;
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 9999;
+  pointer-events: none;
+  white-space: nowrap;
+}
+#bs-toast.show {
+  transform: translateX(-50%) translateY(0);
+}
+
+
+/* ─────────────────────────────────────────
+   RESPONSIVE — Mobile
+   Cards go full-width, options stack,
+   stats collapse to 2-col.
+───────────────────────────────────────── */
+@media (max-width: 600px) {
+  .bs-card { border-radius: 0; box-shadow: none; }
+  .bs-options { grid-template-columns: 1fr; }
+  .bs-stats { grid-template-columns: repeat(2, 1fr); }
+  .bs-analytics-grid { grid-template-columns: 1fr; }
+  .bs-card-grid { grid-template-columns: 1fr; }
+  .bs-upload-zones { grid-template-columns: 1fr; }
+  .bs-header-top { flex-wrap: wrap; }
+  .bs-badges { width: 100%; justify-content: flex-start; }
+}
