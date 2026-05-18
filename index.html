@@ -304,14 +304,104 @@
       border-bottom: 1px solid var(--border);
     }
 
-    /* Hero heatmap — full width */
-    #heatmap-container {
+    /* Hero heatmap + explore panel */
+    #heatmap-explore-wrapper {
+      display: flex;
       height: 560px;
-      overflow: hidden;
       border-top: 1px solid var(--border);
       border-bottom: 1px solid var(--border);
     }
+    #heatmap-container { flex: 1; min-width: 0; overflow: hidden; }
     #heatmap { width: 100%; height: 100%; }
+
+    #explore-panel {
+      width: 280px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid var(--border);
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .explore-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .etab {
+      flex: 1;
+      font-family: var(--font-body);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 10px 4px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .etab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .etab:hover:not(.active) { color: var(--text-mid); }
+    .etab-pane { display: none; flex: 1; overflow-y: auto; padding: var(--sp-3); }
+    .etab-pane.active { display: block; }
+
+    /* Month grid */
+    .month-year-label {
+      font-family: var(--font-display);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: 0.06em;
+      margin: var(--sp-2) 0 var(--sp-1);
+    }
+    .month-year-label:first-child { margin-top: 0; }
+    .month-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: var(--sp-2); }
+    .month-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      height: 46px;
+      padding: 3px 2px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg);
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.12s;
+    }
+    .month-cell:hover:not(.empty) { border-color: var(--accent); }
+    .month-cell.active { border-color: var(--accent); background: var(--accent-light); }
+    .month-cell.empty { opacity: 0.3; cursor: default; }
+    .mc-bar {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      background: var(--accent);
+      opacity: 0.2;
+    }
+    .mc-name { font-size: 8px; font-weight: 600; color: var(--text-muted); position: relative; z-index: 1; }
+    .mc-count { font-family: var(--font-display); font-size: 13px; font-weight: 700; color: var(--text); position: relative; z-index: 1; line-height: 1.1; }
+    .month-clear-btn {
+      width: 100%;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      background: var(--accent-light);
+      border: 1.5px solid var(--accent);
+      border-radius: var(--radius-sm);
+      padding: 5px;
+      cursor: pointer;
+      margin-bottom: var(--sp-2);
+      transition: opacity 0.12s;
+    }
+    .month-clear-btn:hover { opacity: 0.8; }
+
+    /* Timelapse in panel */
+    .tl-panel-hint { font-size: 11px; color: var(--text-muted); line-height: 1.55; margin-bottom: var(--sp-3); }
 
     /* Filter row */
     .filter-row {
@@ -762,21 +852,36 @@
     /* Toast — always dark regardless of mode */
     html.dark-mode #bs-toast { background: #ddd; color: #111; }
 
+    /* Personal records */
+    .record-row {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      padding: 7px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .record-row:last-child { border-bottom: none; }
+    .record-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .record-info { flex: 1; min-width: 0; }
+    .record-label { font-size: 12px; font-weight: 600; color: var(--text); }
+    .record-date { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+    .record-value { font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--accent); flex-shrink: 0; }
+
     /* Responsive */
     @media (max-width: 1200px) {
       .charts-row { grid-template-columns: 1fr 1fr; }
     }
     @media (max-width: 900px) {
-      #heatmap-container { height: 420px; }
+      #heatmap-explore-wrapper { height: auto; flex-direction: column; }
+      #explore-panel { width: 100%; height: 220px; border-left: none; border-top: 1px solid var(--border); }
       .stats-bar { grid-template-columns: repeat(3, 1fr); }
       .charts-row { grid-template-columns: 1fr 1fr; }
     }
     @media (max-width: 600px) {
-      .app-wrapper { padding: var(--sp-3); }
-      #heatmap-container { height: 320px; }
       .stats-bar { grid-template-columns: repeat(2, 1fr); }
       .header-controls { flex-direction: column; align-items: flex-start; }
       .charts-row { grid-template-columns: 1fr; }
+      .charts-row .chart-card[style*="span 2"] { grid-column: span 1; }
     }
   </style>
 </head>
@@ -919,33 +1024,53 @@
       <button class="dup-btn-dismiss" id="btn-dup-dismiss">&times;</button>
     </div>
 
-    <!-- Hero heatmap — full width -->
-    <div id="heatmap-container">
-      <div id="heatmap"></div>
-    </div>
+    <!-- Heatmap + Explore panel -->
+    <div id="heatmap-explore-wrapper">
+      <div id="heatmap-container">
+        <div id="heatmap"></div>
+      </div>
 
-    <!-- Timelapse controls -->
-    <div class="timelapse-bar">
-      <span class="tl-section-label">Timelapse</span>
-      <div class="tl-controls">
-        <button class="tl-play-btn" id="tl-play-btn">&#9654; Play</button>
-        <button class="tl-reset-btn" id="tl-reset-btn">&#9632; Reset</button>
-      </div>
-      <div class="tl-middle">
-        <div class="tl-progress-track">
-          <div class="tl-progress-fill" id="tl-progress-bar"></div>
+      <div id="explore-panel">
+        <div class="explore-tabs">
+          <button class="etab active" data-tab="locations">Locations</button>
+          <button class="etab" data-tab="months">By Month</button>
+          <button class="etab" data-tab="timelapse">Timelapse</button>
         </div>
-        <div class="tl-meta">
-          <span class="tl-date" id="tl-date-label">Press Play to animate routes chronologically</span>
-          <span id="tl-count-label"></span>
+
+        <!-- Locations tab -->
+        <div class="etab-pane active" id="etab-locations">
+          <div id="locations-list" style="font-size:12px;color:var(--text-muted);">
+            Load activities with GPS routes to see top locations.
+          </div>
         </div>
-      </div>
-      <div class="tl-speed-wrap">
-        <span>Speed</span>
-        <input type="range" id="tl-speed" min="1" max="10" value="3" />
-        <span id="tl-speed-val">3&times;</span>
-      </div>
-    </div>
+
+        <!-- By Month tab -->
+        <div class="etab-pane" id="etab-months">
+          <!-- populated by JS -->
+        </div>
+
+        <!-- Timelapse tab -->
+        <div class="etab-pane" id="etab-timelapse">
+          <p class="tl-panel-hint">Animate your routes chronologically &mdash; oldest to newest. Each route flashes as it's added.</p>
+          <div style="display:flex;gap:var(--sp-2);margin-bottom:var(--sp-3);">
+            <button class="tl-play-btn" id="tl-play-btn" style="flex:1;">&#9654; Play</button>
+            <button class="tl-reset-btn" id="tl-reset-btn">&#9632; Reset</button>
+          </div>
+          <div class="tl-progress-track" style="height:6px;margin-bottom:var(--sp-2);">
+            <div class="tl-progress-fill" id="tl-progress-bar"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:var(--sp-3);">
+            <span id="tl-date-label">—</span>
+            <span id="tl-count-label"></span>
+          </div>
+          <div class="tl-speed-wrap">
+            <span>Speed</span>
+            <input type="range" id="tl-speed" min="1" max="10" value="3" style="flex:1;" />
+            <span id="tl-speed-val">3&times;</span>
+          </div>
+        </div>
+      </div><!-- /#explore-panel -->
+    </div><!-- /#heatmap-explore-wrapper -->
 
     <!-- Stats bar — 6 stats -->
     <div class="stats-bar">
@@ -1011,14 +1136,19 @@
     <!-- Charts row -->
     <div class="charts-row">
 
-      <div class="chart-card">
-        <div class="chart-title">Distance Over Time</div>
+      <div class="chart-card" style="grid-column: span 2;">
+        <div class="chart-title">Monthly Distance</div>
         <div id="chart-distance"></div>
       </div>
 
-      <div class="chart-card">
-        <div class="chart-title">Weekly Activity</div>
+      <div class="chart-card" style="grid-column: span 2;">
+        <div class="chart-title">Activity Calendar</div>
         <div id="chart-weekly"></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-title">Personal Records</div>
+        <div id="chart-records"></div>
       </div>
 
       <div class="chart-card" id="chart-hr-card" style="display:none;">
@@ -1029,13 +1159,6 @@
           <span>bpm</span>
         </div>
         <div id="chart-hr-zones"></div>
-      </div>
-
-      <div class="chart-card">
-        <div class="chart-title">Top Locations</div>
-        <div id="locations-list" style="font-size:12px;color:var(--text-muted);">
-          Load activities with GPS routes to see top locations.
-        </div>
       </div>
 
     </div><!-- /.charts-row -->

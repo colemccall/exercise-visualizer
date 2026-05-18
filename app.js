@@ -29,10 +29,11 @@ import { parse as parseApple }   from './parsers/apple.js';
 import { renderDistanceChart }  from './charts/distance.js';
 import { renderWeeklyChart }    from './charts/weekly.js';
 import { renderHRZones }        from './charts/hr-zones.js';
+import { renderRecords }        from './charts/records.js';
 import { renderElevationChart, renderHRLineChart } from './charts/elevation.js';
 
 // ── Map imports ───────────────────────────────────────────────────────────────
-import { initHeatmap, renderHeatmap, _renderedPolylines, _renderedActivities, TYPE_COLORS } from './map/heatmap.js';
+import { initHeatmap, renderHeatmap, setHeatmapTheme, _renderedPolylines, _renderedActivities, TYPE_COLORS } from './map/heatmap.js';
 import { renderRoute }                from './map/route.js';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -52,6 +53,7 @@ const filters = {
   to: null,
   search: '',
   duplicatesOnly: false,
+  month: null, // 'YYYY-M' from explore panel
 };
 
 /** Leaflet heatmap instance */
@@ -299,6 +301,10 @@ function getFilteredActivities() {
       }
       if (term && !a.name.toLowerCase().includes(term) && !a.type.toLowerCase().includes(term)) return false;
       if (filters.duplicatesOnly && !a.has_duplicate) return false;
+      if (filters.month) {
+        const [fy, fm] = filters.month.split('-');
+        if (a.date.getFullYear() !== +fy || a.date.getMonth() !== +fm) return false;
+      }
       return true;
     })
     .sort((a, b) => b.date - a.date);
@@ -406,8 +412,8 @@ function refreshDashboard() {
   updateStatsBar(filtered);
   renderActivityList(filtered);
   renderCharts(filtered);
+  renderMonthsTab(getFilteredBaseActivities());
 
-  // Heatmap: only refresh on major changes (all activities, not filtered)
   refreshHeatmap();
 }
 
@@ -496,12 +502,11 @@ function renderActivityList(activities) {
 }
 
 function renderCharts(activities) {
-  // Distance chart
-  const distContainer = document.getElementById('chart-distance');
-  renderDistanceChart([...activities].sort((a,b)=>a.date-b.date), distContainer, units);
+  const sorted = [...activities].sort((a, b) => a.date - b.date);
 
-  // Weekly chart
+  renderDistanceChart(sorted, document.getElementById('chart-distance'), units);
   renderWeeklyChart(activities, document.getElementById('chart-weekly'));
+  renderRecords(activities, document.getElementById('chart-records'), units);
 
   // HR zones — only show if we have HR data
   const hasHR = activities.some(a => a.avg_heart_rate || (a.route_points && a.route_points.some(p => p.hr)));
@@ -513,6 +518,105 @@ function renderCharts(activities) {
   } else {
     hrCard.style.display = 'none';
   }
+}
+
+// ── Explore panel (Locations / By Month / Timelapse tabs) ─────────────────────
+
+let _exploreActiveTab = 'locations';
+let _monthFilter = null; // 'YYYY-M' or null
+
+function initExplorePanel() {
+  document.querySelectorAll('.etab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _exploreActiveTab = btn.dataset.tab;
+      document.querySelectorAll('.etab').forEach(b => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('.etab-pane').forEach(p => p.classList.toggle('active', p.id === `etab-${_exploreActiveTab}`));
+    });
+  });
+}
+
+function renderMonthsTab(activities) {
+  const container = document.getElementById('etab-months');
+  if (!container) return;
+
+  // Group by year → month
+  const yearMap = new Map();
+  for (const a of activities) {
+    if (!a.date) continue;
+    const y = a.date.getFullYear();
+    const m = a.date.getMonth(); // 0-indexed
+    if (!yearMap.has(y)) yearMap.set(y, new Array(12).fill(0));
+    yearMap.get(y)[m]++;
+  }
+
+  const years = [...yearMap.keys()].sort((a, b) => b - a);
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  let html = '';
+  if (_monthFilter) {
+    html += `<button class="month-clear-btn" id="btn-month-clear">&#x2715; Show all months</button>`;
+  }
+
+  for (const year of years) {
+    const counts = yearMap.get(year);
+    const max = Math.max(1, ...counts);
+    html += `<div class="month-year-label">${year}</div><div class="month-grid">`;
+    for (let m = 0; m < 12; m++) {
+      const key = `${year}-${m}`;
+      const active = _monthFilter === key;
+      const pct = Math.round((counts[m] / max) * 100);
+      html += `<button class="month-cell ${active ? 'active' : ''} ${counts[m] === 0 ? 'empty' : ''}"
+        data-key="${key}" title="${MONTH_NAMES[m]} ${year}: ${counts[m]} activities">
+        <span class="mc-bar" style="height:${pct}%"></span>
+        <span class="mc-name">${MONTH_NAMES[m]}</span>
+        <span class="mc-count">${counts[m] || ''}</span>
+      </button>`;
+    }
+    html += `</div>`;
+  }
+
+  container.innerHTML = html;
+
+  container.querySelectorAll('.month-cell:not(.empty)').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key = btn.dataset.key;
+      if (_monthFilter === key) {
+        _monthFilter = null;
+      } else {
+        _monthFilter = key;
+        const [y, m] = key.split('-');
+        // Zoom map to activities in this month
+        const monthActs = allActivities.filter(a => a.date && a.date.getFullYear() === +y && a.date.getMonth() === +m);
+        const pts = monthActs.flatMap(a => a.route_points || []).filter(p => p.lat && p.lng).map(p => [p.lat, p.lng]);
+        if (pts.length > 1 && heatmapInstance) {
+          try { heatmapInstance.fitBounds(L.latLngBounds(pts), { padding: [30, 30], animate: true }); } catch {}
+        }
+      }
+      filters.month = _monthFilter;
+      refreshDashboard();
+      renderMonthsTab(getFilteredBaseActivities());
+    });
+  });
+
+  container.querySelector('#btn-month-clear')?.addEventListener('click', () => {
+    _monthFilter = null;
+    filters.month = null;
+    refreshDashboard();
+    renderMonthsTab(getFilteredBaseActivities());
+  });
+}
+
+// Activities before month filter is applied (for month tab counts)
+function getFilteredBaseActivities() {
+  const term = filters.search.toLowerCase().trim();
+  return allActivities.filter(a => {
+    if (filters.type !== 'All' && a.type !== filters.type) return false;
+    if (filters.from && a.date < filters.from) return false;
+    if (filters.to) { const t = new Date(filters.to); t.setHours(23,59,59,999); if (a.date > t) return false; }
+    if (term && !a.name.toLowerCase().includes(term) && !a.type.toLowerCase().includes(term)) return false;
+    if (filters.duplicatesOnly && !a.has_duplicate) return false;
+    return true;
+  }).sort((a, b) => b.date - a.date);
 }
 
 async function refreshHeatmap() {
@@ -723,6 +827,8 @@ document.addEventListener('DOMContentLoaded', () => {
     filters.to             = null;
     filters.search         = '';
     filters.duplicatesOnly = false;
+    filters.month          = null;
+    _monthFilter           = null;
     document.getElementById('filter-type').value       = 'All';
     document.getElementById('filter-from').value       = '';
     document.getElementById('filter-to').value         = '';
@@ -751,6 +857,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Dark/light mode
   applyTheme();
   document.getElementById('btn-theme-toggle')?.addEventListener('click', toggleTheme);
+
+  // Explore panel tabs
+  initExplorePanel();
 
   // Timelapse
   document.getElementById('tl-play-btn')?.addEventListener('click', tlToggle);
@@ -1054,4 +1163,5 @@ function toggleTheme() {
   _darkMode = !_darkMode;
   localStorage.setItem('fitness-theme', _darkMode ? 'dark' : 'light');
   applyTheme();
+  setHeatmapTheme(_darkMode);
 }

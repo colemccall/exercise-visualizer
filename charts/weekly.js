@@ -1,142 +1,152 @@
 /**
  * charts/weekly.js
- * D3 v7 stacked bar chart: activities per week, stacked by activity type.
- *
- * Exports:
- *   renderWeeklyChart(activities, container)
- *
- * @param {Activity[]} activities
- * @param {HTMLElement} container   DOM element to render into
+ * GitHub-style activity calendar heatmap.
+ * Shows 52 weeks × 7 days, intensity = activity count per day.
  */
+
+const TYPE_COLORS = {
+  Run:   '#FF6B6B',
+  Ride:  '#4A90D9',
+  Walk:  '#5CB85C',
+  Hike:  '#F0AD4E',
+  Swim:  '#5BC0DE',
+  Other: '#aaaaaa',
+};
 
 export function renderWeeklyChart(activities, container) {
   container.innerHTML = '';
-
   if (activities.length === 0) {
     container.innerHTML = '<p style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px 0">No data</p>';
     return;
   }
 
-  const TYPES = ['Run', 'Ride', 'Walk', 'Hike', 'Swim', 'Other'];
-  const COLORS = {
-    Run:   '#FF6B6B',
-    Ride:  '#4A90D9',
-    Walk:  '#5CB85C',
-    Hike:  '#F0AD4E',
-    Swim:  '#5BC0DE',
-    Other: '#aaaaaa',
-  };
-
-  // ── Group activities by ISO week (Monday-based) ───────────────────────────
-  const weekMap = new Map(); // weekKey → { weekStart: Date, Run:0, Ride:0, ... }
-
-  for (const act of activities) {
-    if (!act.date) continue;
-    const weekStart = getWeekStart(act.date);
-    const key = weekStart.toISOString().slice(0, 10);
-
-    if (!weekMap.has(key)) {
-      const entry = { weekStart, total: 0 };
-      TYPES.forEach(t => (entry[t] = 0));
-      weekMap.set(key, entry);
-    }
-    const entry = weekMap.get(key);
-    const t = TYPES.includes(act.type) ? act.type : 'Other';
-    entry[t]++;
-    entry.total++;
+  // Build day map: dateKey → { count, types, totalDist }
+  const dayMap = new Map();
+  for (const a of activities) {
+    if (!a.date) continue;
+    const d = new Date(a.date);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if (!dayMap.has(key)) dayMap.set(key, { count: 0, types: [], dist: 0 });
+    const e = dayMap.get(key);
+    e.count++;
+    e.types.push(a.type);
+    e.dist += a.distance_m || 0;
   }
 
-  // Sort weeks ascending and limit to last 52 weeks for readability
-  let weekData = Array.from(weekMap.values()).sort((a, b) => a.weekStart - b.weekStart);
-  if (weekData.length > 52) weekData = weekData.slice(-52);
+  // Build 52-week grid ending today
+  const today = new Date(); today.setHours(0,0,0,0);
+  const WEEKS = 52;
+  // Start from (today - 52 weeks + 1), aligned to Sunday
+  const startDay = new Date(today);
+  startDay.setDate(startDay.getDate() - WEEKS * 7 + 1);
+  // Align back to Sunday
+  startDay.setDate(startDay.getDate() - startDay.getDay());
 
-  // ── D3 stack ──────────────────────────────────────────────────────────────
-  const stack = d3.stack().keys(TYPES);
-  const series = stack(weekData);
+  const days = [];
+  const cur = new Date(startDay);
+  while (cur <= today) {
+    const key = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
+    days.push({ date: new Date(cur), key, ...(dayMap.get(key) || { count: 0, types: [], dist: 0 }) });
+    cur.setDate(cur.getDate() + 1);
+  }
 
-  // ── Dimensions ────────────────────────────────────────────────────────────
-  const W = container.clientWidth || 280;
-  const H = 160;
-  const margin = { top: 10, right: 10, bottom: 28, left: 28 };
-  const innerW = W - margin.left - margin.right;
-  const innerH = H - margin.top - margin.bottom;
+  const maxCount = Math.max(1, d3.max(days, d => d.count));
 
-  const xScale = d3.scaleBand()
-    .domain(weekData.map(d => d.weekStart))
-    .range([0, innerW])
-    .padding(0.15);
+  const CELL  = 11;
+  const GAP   = 2;
+  const LABEL_H = 14;
+  const LABEL_W = 24;
+  const W = container.clientWidth || 300;
+  const cols = Math.min(WEEKS, Math.floor((W - LABEL_W) / (CELL + GAP)));
+  const H = 7 * (CELL + GAP) + LABEL_H + 4;
 
-  const yMax = d3.max(weekData, d => d.total) || 1;
-  const yScale = d3.scaleLinear()
-    .domain([0, yMax * 1.1])
-    .nice()
-    .range([innerH, 0]);
+  const svg = d3.select(container).append('svg').attr('width', W).attr('height', H);
 
-  // ── SVG ───────────────────────────────────────────────────────────────────
-  const svg = d3.select(container)
-    .append('svg')
-    .attr('width', W)
-    .attr('height', H);
+  // Day-of-week labels (Mon, Wed, Fri)
+  const DOW_LABELS = ['S','M','T','W','T','F','S'];
+  DOW_LABELS.forEach((lbl, i) => {
+    if (i % 2 !== 1) return; // only M, W, F
+    svg.append('text')
+      .attr('x', 2).attr('y', LABEL_H + i * (CELL + GAP) + CELL * 0.8)
+      .attr('fill', 'var(--text-muted)').style('font-size', '8px').text(lbl);
+  });
 
-  const g = svg.append('g')
-    .attr('transform', `translate(${margin.left},${margin.top})`);
+  const g = svg.append('g').attr('transform', `translate(${LABEL_W}, ${LABEL_H})`);
 
-  // X axis — only show a few tick labels to avoid crowding
-  const tickEvery = Math.ceil(weekData.length / 6);
-  g.append('g')
-    .attr('transform', `translate(0,${innerH})`)
-    .call(
-      d3.axisBottom(xScale)
-        .tickValues(weekData.filter((_, i) => i % tickEvery === 0).map(d => d.weekStart))
-        .tickFormat(d3.timeFormat('%b %d'))
-    )
-    .call(ax => ax.select('.domain').remove())
-    .call(ax => ax.selectAll('line').remove())
-    .call(ax => ax.selectAll('text')
-      .attr('fill', 'var(--text-muted)')
-      .style('font-size', '9px')
-      .attr('transform', 'rotate(-30)')
-      .attr('text-anchor', 'end')
-    );
+  // Month labels
+  let lastMonth = -1;
+  days.filter((d, i) => i % 7 === 0).forEach((d, wi) => {
+    if (d.date.getMonth() !== lastMonth) {
+      lastMonth = d.date.getMonth();
+      g.append('text')
+        .attr('x', wi * (CELL + GAP))
+        .attr('y', -3)
+        .attr('fill', 'var(--text-muted)')
+        .style('font-size', '8px')
+        .text(d3.timeFormat('%b')(d.date));
+    }
+  });
 
-  // Y axis
-  g.append('g')
-    .call(d3.axisLeft(yScale).ticks(4).tickFormat(d3.format('d')))
-    .call(ax => ax.select('.domain').remove())
-    .call(ax => ax.selectAll('line').attr('stroke', 'var(--border)'))
-    .call(ax => ax.selectAll('text').attr('fill', 'var(--text-muted)').style('font-size', '10px'));
+  // Tooltip
+  const tooltip = addTooltip(container);
 
-  // Stacked bars
-  g.selectAll('.layer')
-    .data(series)
-    .join('g')
-    .attr('class', 'layer')
-    .attr('fill', d => COLORS[d.key] || '#aaa')
-    .selectAll('rect')
-    .data(d => d)
+  // Cells
+  g.selectAll('rect')
+    .data(days)
     .join('rect')
-    .attr('x', d => xScale(d.data.weekStart))
-    .attr('y', d => yScale(d[1]))
-    .attr('height', d => Math.max(0, yScale(d[0]) - yScale(d[1])))
-    .attr('width', xScale.bandwidth())
-    .attr('rx', 1);
-
-  // Legend (compact, inline)
-  const activeLegend = TYPES.filter(t => weekData.some(w => w[t] > 0));
-  const legendG = svg.append('g')
-    .attr('transform', `translate(${margin.left},${H - 4})`);
-
-  // We'll put the legend to the right of the chart if there's room,
-  // otherwise skip it (the chart is small).
-  // (Skipping for now since we have very limited height)
+    .attr('x', d => {
+      const weekIndex = Math.floor((d.date - startDay) / (7 * 86400000));
+      return weekIndex * (CELL + GAP);
+    })
+    .attr('y', d => d.date.getDay() * (CELL + GAP))
+    .attr('width', CELL).attr('height', CELL).attr('rx', 2)
+    .attr('fill', d => {
+      if (d.count === 0) return 'var(--border)';
+      // Primary type for the day
+      const primary = mostCommon(d.types);
+      const base = TYPE_COLORS[primary] || TYPE_COLORS.Other;
+      // Intensity based on count relative to max
+      const intensity = 0.25 + 0.75 * (d.count / maxCount);
+      return colorWithOpacity(base, intensity);
+    })
+    .on('mousemove', (event, d) => {
+      if (d.count === 0) return;
+      const dateStr = d.date.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' });
+      const types   = [...new Set(d.types)].join(', ');
+      const dist    = d.dist > 0 ? `<br>${(d.dist / 1000).toFixed(1)} km` : '';
+      tooltip.show(event, `<strong>${dateStr}</strong><br>${d.count} ${d.count === 1 ? 'activity' : 'activities'} · ${types}${dist}`);
+    })
+    .on('mouseleave', () => tooltip.hide());
 }
 
-// ── Helper: get Monday-based week start ───────────────────────────────────────
-function getWeekStart(date) {
-  const d = new Date(date);
-  const day = d.getDay(); // 0=Sun
-  const diff = (day === 0) ? -6 : 1 - day; // adjust to Monday
-  d.setDate(d.getDate() + diff);
-  d.setHours(0, 0, 0, 0);
-  return d;
+function mostCommon(arr) {
+  const freq = {};
+  let max = 0, best = arr[0];
+  for (const v of arr) {
+    freq[v] = (freq[v] || 0) + 1;
+    if (freq[v] > max) { max = freq[v]; best = v; }
+  }
+  return best;
+}
+
+function colorWithOpacity(hex, opacity) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${opacity.toFixed(2)})`;
+}
+
+function addTooltip(container) {
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--text);pointer-events:none;z-index:9000;display:none;box-shadow:0 2px 8px rgba(0,0,0,0.15);line-height:1.6;';
+  document.body.appendChild(el);
+  return {
+    show(event, html) {
+      el.innerHTML = html;
+      el.style.display = 'block';
+      el.style.left = (event.clientX + 12) + 'px';
+      el.style.top  = (event.clientY - 10) + 'px';
+    },
+    hide() { el.style.display = 'none'; },
+  };
 }
