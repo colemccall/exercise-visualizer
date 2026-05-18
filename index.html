@@ -293,6 +293,14 @@
       color: #fff;
     }
 
+    /* Override design system's 9px stat label */
+    .stats-bar .bs-stat-lbl, .detail-stats .bs-stat-lbl {
+      font-size: 11px;
+      color: var(--text-mid);
+      letter-spacing: 0.05em;
+    }
+    .stats-bar .bs-stat-num { font-size: 22px; }
+
     /* Stats bar — 6 columns */
     .stats-bar {
       display: grid;
@@ -331,11 +339,11 @@
     .etab {
       flex: 1;
       font-family: var(--font-body);
-      font-size: 10px;
+      font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      padding: 10px 4px;
+      padding: 11px 4px;
       border: none;
       background: transparent;
       color: var(--text-muted);
@@ -351,9 +359,9 @@
     /* Month grid */
     .month-year-label {
       font-family: var(--font-display);
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 700;
-      color: var(--text-muted);
+      color: var(--text-mid);
       letter-spacing: 0.06em;
       margin: var(--sp-2) 0 var(--sp-1);
     }
@@ -383,7 +391,7 @@
       background: var(--accent);
       opacity: 0.2;
     }
-    .mc-name { font-size: 8px; font-weight: 600; color: var(--text-muted); position: relative; z-index: 1; }
+    .mc-name { font-size: 9px; font-weight: 600; color: var(--text-mid); position: relative; z-index: 1; }
     .mc-count { font-family: var(--font-display); font-size: 13px; font-weight: 700; color: var(--text); position: relative; z-index: 1; line-height: 1.1; }
     .month-clear-btn {
       width: 100%;
@@ -447,11 +455,11 @@
     }
     .list-header {
       padding: var(--sp-3) var(--sp-6);
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--text-muted);
+      letter-spacing: 0.06em;
+      color: var(--text-mid);
       border-bottom: 1px solid var(--border);
       background: var(--surface);
       display: flex;
@@ -478,7 +486,7 @@
     .activity-type-icon { font-size: 18px; flex-shrink: 0; }
     .activity-info { flex: 1; min-width: 0; }
     .activity-name {
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 600;
       color: var(--text);
       white-space: nowrap;
@@ -486,25 +494,25 @@
       text-overflow: ellipsis;
     }
     .activity-meta {
-      font-size: 11px;
-      color: var(--text-muted);
+      font-size: 12px;
+      color: var(--text-mid);
       margin-top: 1px;
     }
     .activity-stats { text-align: right; flex-shrink: 0; }
     .activity-dist {
       font-family: var(--font-display);
-      font-size: 15px;
+      font-size: 16px;
       font-weight: 700;
       color: var(--text);
     }
     .activity-dur {
-      font-size: 11px;
-      color: var(--text-muted);
+      font-size: 12px;
+      color: var(--text-mid);
     }
     .activity-source-badge {
-      font-size: 9px;
+      font-size: 10px;
       font-weight: 700;
-      padding: 2px 5px;
+      padding: 2px 6px;
       border-radius: 3px;
       text-transform: uppercase;
     }
@@ -672,7 +680,8 @@
       --wrong-bg:     #2e0f0f;
       --wrong-bd:     #7a2020;
       --warn-bg:      #2e2000;
-      --accent-light: #2a0808;
+      --accent:       #3b82f6;
+      --accent-light: #172554;
     }
     /* Source badges — light and dark */
     .source-badge.strava  { color: #FC4C02; background: #fff3ef; border-color: #FC4C02; }
@@ -997,7 +1006,7 @@
           <div class="bs-logo">&#127939; Fitness</div>
           <div class="bs-logo-sub">Activity Visualizer</div>
         </div>
-        <div class="bs-badges" id="dash-source-badges"></div>
+        <div id="dash-source-badges" style="display:none"></div>
       </div>
     </div>
 

@@ -135,12 +135,12 @@
   --accent-light: #fef3c7;
 }
 
-/* Fitness Visualizer — Red → Orange */
+/* Fitness Visualizer — Navy → Blue */
 .app-fitness {
-  --grad-a:       #DC2626;
-  --grad-b:       #EA580C;
-  --accent:       #DC2626;
-  --accent-light: #fff1f2;
+  --grad-a:       #1e3a5f;
+  --grad-b:       #3b4fd8;
+  --accent:       #2563eb;
+  --accent-light: #eff6ff;
 }
 
 
