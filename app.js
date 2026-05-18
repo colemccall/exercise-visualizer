@@ -241,6 +241,13 @@ function formatElevation(metres) {
   return `${Math.round(metres)} m`;
 }
 
+function formatMovingTime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  if (h >= 100) return `${h.toLocaleString()}h`;
+  const m = Math.floor((seconds % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
 function formatDuration(seconds) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -310,16 +317,33 @@ function updateSourceBadges() {
 function updateStatsBar(activities) {
   const totalDist = activities.reduce((sum, a) => sum + (a.distance_m || 0), 0);
   const totalElev = activities.reduce((sum, a) => sum + (a.elevation_gain_m || 0), 0);
+  const totalSecs = activities.reduce((sum, a) => sum + (a.duration_s || 0), 0);
+
+  // Avg pace — only for run/ride/walk/hike activities with both distance and time
+  const paceable = activities.filter(a =>
+    ['Run','Ride','Walk','Hike'].includes(a.type) && a.distance_m > 100 && a.duration_s > 0
+  );
+  const avgPaceStr = paceable.length > 0
+    ? formatPace(
+        paceable.reduce((s,a) => s + a.distance_m, 0),
+        paceable.reduce((s,a) => s + a.duration_s, 0)
+      )
+    : '—';
 
   const dates = activities.map(a => a.date).filter(Boolean).sort((a,b)=>a-b);
   const rangeStr = dates.length >= 2
     ? `${dates[0].getFullYear()}–${dates[dates.length-1].getFullYear()}`
     : dates.length === 1 ? String(dates[0].getFullYear()) : '—';
 
-  document.getElementById('stat-total').textContent    = activities.length.toLocaleString();
-  document.getElementById('stat-distance').textContent = formatDistance(totalDist);
+  document.getElementById('stat-total').textContent     = activities.length.toLocaleString();
+  document.getElementById('stat-distance').textContent  = formatDistance(totalDist);
+  document.getElementById('stat-time').textContent      = formatMovingTime(totalSecs);
   document.getElementById('stat-elevation').textContent = formatElevation(totalElev);
-  document.getElementById('stat-range').textContent    = rangeStr;
+  document.getElementById('stat-pace').textContent      = avgPaceStr;
+  document.getElementById('stat-range').textContent     = rangeStr;
+
+  const countLbl = document.getElementById('list-count-label');
+  if (countLbl) countLbl.textContent = `${activities.length.toLocaleString()} activities`;
 }
 
 function renderActivityList(activities) {

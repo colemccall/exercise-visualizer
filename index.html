@@ -130,6 +130,7 @@
       display: flex;
       gap: var(--sp-2);
       flex: 1;
+      flex-wrap: wrap;
     }
 
     .source-badge {
@@ -166,16 +167,25 @@
       color: #fff;
     }
 
-    /* Stats bar */
+    /* Stats bar — 6 columns */
     .stats-bar {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(6, 1fr);
       padding: var(--sp-4) var(--sp-6);
       gap: var(--sp-2);
       background: var(--surface);
       border-top: 1px solid var(--border);
       border-bottom: 1px solid var(--border);
     }
+
+    /* Hero heatmap — full width */
+    #heatmap-container {
+      height: 560px;
+      overflow: hidden;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    #heatmap { width: 100%; height: 100%; }
 
     /* Filter row */
     .filter-row {
@@ -210,34 +220,15 @@
       border-color: var(--accent);
     }
 
-    /* Main split layout */
-    .main-split {
-      display: grid;
-      grid-template-columns: 1fr 380px;
-      gap: var(--sp-4);
-      padding: var(--sp-4) var(--sp-6);
-    }
-
-    /* Heatmap */
-    #heatmap-container {
-      height: 480px;
-      border-radius: var(--radius-md);
-      overflow: hidden;
-      border: 1px solid var(--border);
-    }
-    #heatmap { width: 100%; height: 100%; }
-
-    /* Activity list */
+    /* Activity list — full width below map */
     #activity-list-container {
-      height: 480px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-md);
-      overflow: hidden;
+      height: 380px;
+      border-bottom: 1px solid var(--border);
       display: flex;
       flex-direction: column;
     }
     .list-header {
-      padding: var(--sp-3) var(--sp-4);
+      padding: var(--sp-3) var(--sp-6);
       font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
@@ -245,6 +236,9 @@
       color: var(--text-muted);
       border-bottom: 1px solid var(--border);
       background: var(--surface);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
     #activity-list {
       overflow-y: auto;
@@ -469,12 +463,13 @@
 
     /* Responsive */
     @media (max-width: 900px) {
-      .main-split { grid-template-columns: 1fr; }
-      #activity-list-container { height: 360px; }
+      #heatmap-container { height: 420px; }
+      .stats-bar { grid-template-columns: repeat(3, 1fr); }
       .charts-row { grid-template-columns: 1fr; }
     }
     @media (max-width: 600px) {
       .app-wrapper { padding: var(--sp-3); }
+      #heatmap-container { height: 320px; }
       .stats-bar { grid-template-columns: repeat(2, 1fr); }
       .header-controls { flex-direction: column; align-items: flex-start; }
     }
@@ -519,17 +514,18 @@
           <input type="file" id="file-strava" accept=".zip,.csv,.gpx" style="display:none" multiple />
           <div class="bs-upload-icon">&#129984;</div>
           <div class="bs-upload-name">Strava</div>
-          <label for="file-strava" class="upload-choose-btn" id="sub-strava">Choose file</label>
-          <div class="bs-upload-sub" style="margin-top:2px;">or drag &amp; drop</div>
+          <label for="file-strava" class="upload-choose-btn" id="sub-strava">Choose ZIP file</label>
+          <div class="bs-upload-sub" style="margin-top:2px;">export.zip &bull; activities.csv &bull; .gpx</div>
           <details class="how-to-export" style="margin-top:var(--sp-3); text-align:left;">
-            <summary>How to export</summary>
+            <summary>How to get your Strava export</summary>
             <div class="export-body">
               <ol>
                 <li>Go to <strong>strava.com</strong> &rarr; Settings &rarr; My Account</li>
                 <li>Scroll to "Download or Delete Your Account"</li>
-                <li>Click "Request Your Archive" and wait for an email</li>
-                <li>Download the ZIP and drop it here, or drop <code>activities.csv</code> directly</li>
+                <li>Click "Request Your Archive" &mdash; you&rsquo;ll get an email with a link</li>
+                <li>Download the <strong>ZIP file</strong> and upload it here</li>
               </ol>
+              <p style="margin-top:8px;color:var(--text-muted);">Note: Strava exports most activities as .fit files (no map). Only activities with .gpx files will show on the heatmap.</p>
             </div>
           </details>
         </div>
@@ -618,7 +614,12 @@
       </div>
     </div>
 
-    <!-- Stats bar -->
+    <!-- Hero heatmap — full width -->
+    <div id="heatmap-container">
+      <div id="heatmap"></div>
+    </div>
+
+    <!-- Stats bar — 6 stats -->
     <div class="stats-bar">
       <div class="bs-stat">
         <div class="bs-stat-num" id="stat-total">&mdash;</div>
@@ -629,8 +630,16 @@
         <div class="bs-stat-lbl">Total Distance</div>
       </div>
       <div class="bs-stat">
+        <div class="bs-stat-num" id="stat-time">&mdash;</div>
+        <div class="bs-stat-lbl">Moving Time</div>
+      </div>
+      <div class="bs-stat">
         <div class="bs-stat-num" id="stat-elevation">&mdash;</div>
         <div class="bs-stat-lbl">Elevation Gain</div>
+      </div>
+      <div class="bs-stat">
+        <div class="bs-stat-num" id="stat-pace">&mdash;</div>
+        <div class="bs-stat-lbl">Avg Pace</div>
       </div>
       <div class="bs-stat">
         <div class="bs-stat-num" id="stat-range">&mdash;</div>
@@ -657,24 +666,14 @@
       <button class="bs-btn-ghost bs-btn" id="btn-clear-filters" style="font-size:12px;">Clear</button>
     </div>
 
-    <!-- Main split: map + list -->
-    <div class="main-split">
-
-      <!-- Heatmap -->
-      <div>
-        <div class="chart-title" style="margin-bottom:var(--sp-2);">Route Heatmap</div>
-        <div id="heatmap-container">
-          <div id="heatmap"></div>
-        </div>
+    <!-- Activity list — full width -->
+    <div id="activity-list-container">
+      <div class="list-header">
+        <span>Recent Activities</span>
+        <span id="list-count-label" style="font-weight:400;"></span>
       </div>
-
-      <!-- Activity list -->
-      <div id="activity-list-container">
-        <div class="list-header">Recent Activities</div>
-        <div id="activity-list"></div>
-      </div>
-
-    </div><!-- /.main-split -->
+      <div id="activity-list"></div>
+    </div>
 
     <!-- Charts row -->
     <div class="charts-row">
