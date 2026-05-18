@@ -24,7 +24,6 @@ window.d3 = _d3;
 // ── Parser imports ────────────────────────────────────────────────────────────
 import { parse as parseStrava }  from './parsers/strava.js';
 import { parse as parseApple }   from './parsers/apple.js';
-import { parse as parseGarmin }  from './parsers/garmin.js';
 
 // ── Chart imports ─────────────────────────────────────────────────────────────
 import { renderDistanceChart }  from './charts/distance.js';
@@ -65,8 +64,8 @@ let detailRouteMap = null;
 // UPLOAD HANDLING — stage files per source, parse all on "Go"
 // ═════════════════════════════════════════════════════════════════════════════
 
-const SOURCES = ['strava', 'apple', 'garmin'];
-const PARSERS = { strava: parseStrava, apple: parseApple, garmin: parseGarmin };
+const SOURCES = ['strava', 'apple'];
+const PARSERS = { strava: parseStrava, apple: parseApple };
 
 /** Staged (not yet parsed) files per source */
 const stagedFiles = { strava: [], apple: [], garmin: [] };
@@ -214,11 +213,12 @@ async function parseAllStaged() {
  * @param {Activity[]} activities  Modified in-place
  */
 function flagDuplicates(activities) {
-  const MS_5_MIN = 5 * 60 * 1000;
+  // Allow up to 10 minutes time difference — clocks & GPS sync vary between devices
+  const MS_10_MIN = 10 * 60 * 1000;
 
   for (const a of activities) {
     a.has_duplicate = false;
-    a.duplicate_of  = null; // id of the activity it clashes with
+    a.duplicate_of  = null;
   }
 
   for (let i = 0; i < activities.length; i++) {
@@ -228,19 +228,33 @@ function flagDuplicates(activities) {
 
       if (a.source === b.source) continue;
       if (!a.date || !b.date) continue;
+      if (a.type !== b.type) continue; // different activity types can't be the same workout
 
       const timeDiff = Math.abs(a.date - b.date);
-      if (timeDiff > MS_5_MIN) continue;
+      if (timeDiff > MS_10_MIN) continue;
 
+      // Primary: distance match within 10%
       const distA = a.distance_m;
       const distB = b.distance_m;
-      if (distA === 0 && distB === 0) continue;
+      let isDupe = false;
 
-      const larger    = Math.max(distA, distB);
-      const smaller   = Math.min(distA, distB);
-      const distRatio = larger > 0 ? (larger - smaller) / larger : 0;
+      if (distA > 100 && distB > 100) {
+        // Both have meaningful distance — compare it
+        const larger    = Math.max(distA, distB);
+        const smaller   = Math.min(distA, distB);
+        const distRatio = (larger - smaller) / larger;
+        if (distRatio <= 0.10) isDupe = true;
+      } else if (distA < 100 && distB < 100) {
+        // Neither has distance (e.g. strength training) — match by duration within 10%
+        if (a.duration_s > 60 && b.duration_s > 60) {
+          const durLarger  = Math.max(a.duration_s, b.duration_s);
+          const durSmaller = Math.min(a.duration_s, b.duration_s);
+          if ((durLarger - durSmaller) / durLarger <= 0.10) isDupe = true;
+        }
+      }
+      // If one has distance and the other doesn't, we can't reliably match — skip
 
-      if (distRatio <= 0.05) {
+      if (isDupe) {
         a.has_duplicate = true;
         b.has_duplicate = true;
         if (!a.duplicate_of) a.duplicate_of = b.id;
@@ -507,9 +521,7 @@ async function refreshHeatmap() {
     heatmapInstance = initHeatmap(container);
   }
   await renderHeatmap(allActivities, heatmapInstance);
-  // Update locations panel after routes are loaded
-  const filtered = getFilteredActivities();
-  renderLocationsPanel(filtered);
+  renderLocationsPanel();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -975,17 +987,18 @@ async function computeTopLocations(activities, limit = 10) {
   return results;
 }
 
-async function renderLocationsPanel(activities) {
+async function renderLocationsPanel() {
   const container = document.getElementById('locations-list');
   if (!container) return;
 
-  container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">Computing locations…</div>';
-
-  const routable = activities.filter(a => a.route_points && a.route_points.length > 0);
+  // Use heatmap-rendered activities — these are the ones with route_points loaded
+  const routable = _renderedActivities.filter(a => a.route_points && a.route_points.length > 0);
   if (routable.length === 0) {
-    container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">No route data available. Load activities with GPS routes.</div>';
+    container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">No GPS routes loaded yet.</div>';
     return;
   }
+
+  container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">Computing locations…</div>';
 
   const locs = await computeTopLocations(routable, 10);
   if (locs.length === 0) {

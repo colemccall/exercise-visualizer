@@ -93,6 +93,9 @@
       margin-bottom: var(--sp-1);
     }
 
+    /* 2-source upload grid */
+    .bs-upload-zones { grid-template-columns: repeat(2, 1fr) !important; max-width: 560px; }
+
     /* Staged file list inside upload zone */
     .staged-file-list {
       margin-top: var(--sp-2);
@@ -267,7 +270,6 @@
     }
     .source-badge.strava  { color: #FC4C02; background: #fff3ef; }
     .source-badge.apple   { color: #555; background: #f5f5f5; }
-    .source-badge.garmin  { color: #1565C0; background: #e8f0fe; }
 
     .unit-toggle {
       display: flex;
@@ -418,7 +420,6 @@
     }
     .activity-source-badge.strava  { background: #fff3ef; color: #FC4C02; }
     .activity-source-badge.apple   { background: #f5f5f5; color: #555; }
-    .activity-source-badge.garmin  { background: #e8f0fe; color: #1565C0; }
 
     .duplicate-badge {
       position: absolute;
@@ -586,16 +587,12 @@
     /* Source badges — light and dark */
     .source-badge.strava  { color: #FC4C02; background: #fff3ef; border-color: #FC4C02; }
     .source-badge.apple   { color: #555;    background: #f5f5f5; border-color: #aaa; }
-    .source-badge.garmin  { color: #1565C0; background: #e8f0fe; border-color: #1565C0; }
     html.dark-mode .source-badge.strava  { background: #3d1500; color: #ff7043; border-color: #ff5722; }
     html.dark-mode .source-badge.apple   { background: #252525; color: #ccc;    border-color: #666; }
-    html.dark-mode .source-badge.garmin  { background: #0d1e38; color: #64b5f6; border-color: #1565c0; }
     .activity-source-badge.strava  { background: #fff3ef; color: #FC4C02; }
     .activity-source-badge.apple   { background: #f5f5f5; color: #555; }
-    .activity-source-badge.garmin  { background: #e8f0fe; color: #1565C0; }
     html.dark-mode .activity-source-badge.strava  { background: #3d1500; color: #ff7043; }
     html.dark-mode .activity-source-badge.apple   { background: #252525; color: #ccc; }
-    html.dark-mode .activity-source-badge.garmin  { background: #0d1e38; color: #64b5f6; }
     html.dark-mode .bs-upload-zone.loaded { background: var(--correct-bg); border-color: var(--correct-bd); }
 
     /* ── Timelapse bar ── */
@@ -852,26 +849,6 @@
                 <li>Tap your profile picture (top right)</li>
                 <li>Tap "Export All Health Data"</li>
                 <li>Share the resulting ZIP to your computer and drop it here</li>
-              </ol>
-            </div>
-          </details>
-        </div>
-
-        <!-- Garmin -->
-        <div class="bs-upload-zone" id="zone-garmin" data-source="garmin">
-          <input type="file" id="file-garmin" accept=".zip,.json,.gpx" style="display:none" multiple />
-          <div class="bs-upload-icon">&#128309;</div>
-          <div class="bs-upload-name">Garmin</div>
-          <label for="file-garmin" class="upload-choose-btn" id="sub-garmin">Choose file</label>
-          <div id="filelist-garmin" class="staged-file-list"></div>
-          <details class="how-to-export" style="margin-top:var(--sp-3); text-align:left;">
-            <summary>How to export</summary>
-            <div class="export-body">
-              <ol>
-                <li>Go to <strong>connect.garmin.com</strong></li>
-                <li>Click your name &rarr; Account Settings &rarr; Data Management</li>
-                <li>Under "Export Your Data" click "Request Data Export"</li>
-                <li>Wait for an email with a download link, then drop the ZIP here</li>
               </ol>
             </div>
           </details>
