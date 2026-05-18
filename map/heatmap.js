@@ -65,14 +65,18 @@ export async function renderHeatmap(activities, map) {
   const routable = activities
     .filter(a => a.has_route || a.route_points)
     .sort((a, b) => b.date - a.date)
-    .slice(0, 300);
+    .slice(0, 10000);
 
-  await Promise.all(routable.map(async (activity) => {
-    if (!activity.route_points && activity._gpxLoader) {
-      try { activity.route_points = await activity._gpxLoader(); }
-      catch (e) { activity.route_points = []; }
-    }
-  }));
+  // Load GPX routes in batches to avoid spawning thousands of concurrent fetches
+  const BATCH = 50;
+  for (let i = 0; i < routable.length; i += BATCH) {
+    await Promise.all(routable.slice(i, i + BATCH).map(async (activity) => {
+      if (!activity.route_points && activity._gpxLoader) {
+        try { activity.route_points = await activity._gpxLoader(); }
+        catch (e) { activity.route_points = []; }
+      }
+    }));
+  }
 
   const allLatLngs = [];
 
