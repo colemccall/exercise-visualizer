@@ -65,7 +65,7 @@ export async function renderHeatmap(activities, map) {
   const routable = activities
     .filter(a => a.has_route || a.route_points)
     .sort((a, b) => b.date - a.date)
-    .slice(0, 50);
+    .slice(0, 300);
 
   await Promise.all(routable.map(async (activity) => {
     if (!activity.route_points && activity._gpxLoader) {

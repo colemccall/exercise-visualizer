@@ -411,10 +411,11 @@ function refreshDashboard() {
   updateSourceBadges();
   updateStatsBar(filtered);
   renderActivityList(filtered);
-  renderCharts(filtered);
-  renderMonthsTab(getFilteredBaseActivities());
 
-  refreshHeatmap();
+  try { renderCharts(filtered); } catch (e) { console.error('Chart error:', e); }
+  try { renderMonthsTab(getFilteredBaseActivities()); } catch (e) { console.error('Month tab error:', e); }
+
+  refreshHeatmap(filtered);
 }
 
 function updateSourceBadges() {
@@ -619,13 +620,41 @@ function getFilteredBaseActivities() {
   }).sort((a, b) => b.date - a.date);
 }
 
-async function refreshHeatmap() {
+async function refreshHeatmap(filtered) {
   if (!heatmapInstance) {
     const container = document.getElementById('heatmap');
     heatmapInstance = initHeatmap(container);
   }
-  await renderHeatmap(allActivities, heatmapInstance);
-  renderLocationsPanel();
+
+  // Full re-render only on first load or when activities change globally
+  if (!_lastHeatmapCount || _lastHeatmapCount !== allActivities.length) {
+    _lastHeatmapCount = allActivities.length;
+    await renderHeatmap(allActivities, heatmapInstance);
+    renderLocationsPanel();
+  }
+
+  // Apply month/filter dimming to already-rendered polylines
+  applyHeatmapFilter(filtered);
+}
+
+let _lastHeatmapCount = 0;
+
+function applyHeatmapFilter(filtered) {
+  if (!_renderedPolylines.length) return;
+  const filteredIds = new Set(filtered.map(a => a.id));
+  const hasFilter   = filters.type !== 'All' || filters.month || filters.search || filters.duplicatesOnly;
+
+  for (let i = 0; i < _renderedPolylines.length; i++) {
+    const act   = _renderedActivities[i];
+    const poly  = _renderedPolylines[i];
+    if (!poly || !act) continue;
+    const color = TYPE_COLORS[act.type] || TYPE_COLORS.Other;
+    if (!hasFilter || filteredIds.has(act.id)) {
+      poly.setStyle({ color, weight: 2, opacity: 0.7 });
+    } else {
+      poly.setStyle({ color, weight: 1, opacity: 0.12 });
+    }
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
