@@ -184,9 +184,11 @@ export async function parse(file, onProgress = () => {}) {
   if (lowerName.endsWith('.zip')) {
     const zip = await JSZip.loadAsync(file);
 
-    // Find the main export.xml
+    // Find the main export.xml — exclude the CDA variant which has no Workout elements
     const xmlEntry = Object.values(zip.files).find(f =>
-      !f.dir && (f.name.toLowerCase().endsWith('export.xml') || f.name.toLowerCase().endsWith('export_cda.xml'))
+      !f.dir &&
+      f.name.toLowerCase().endsWith('export.xml') &&
+      !f.name.toLowerCase().includes('cda')
     );
 
     if (!xmlEntry) {

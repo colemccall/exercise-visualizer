@@ -21,16 +21,21 @@
       min-height: 100vh;
     }
 
-    .app-wrapper {
-      max-width: 1200px;
+    /* Upload screen: centered narrow wrapper */
+    .upload-wrapper {
+      max-width: 720px;
       margin: 0 auto;
-      padding: var(--sp-6);
+      padding: var(--sp-6) var(--sp-6) 0;
     }
 
-    /* -- Upload screen -- */
     #upload-screen {
-      max-width: 700px;
-      margin: 40px auto;
+      margin-bottom: var(--sp-6);
+    }
+
+    /* Dashboard: full viewport width, no card rounding at edges */
+    #dashboard-screen .bs-card {
+      border-radius: 0;
+      box-shadow: none;
     }
 
     .upload-instructions {
@@ -204,7 +209,8 @@
       letter-spacing: 0.06em;
     }
     .filter-row select,
-    .filter-row input[type="date"] {
+    .filter-row input[type="date"],
+    .filter-row input[type="search"] {
       font-family: var(--font-body);
       font-size: 12px;
       padding: 5px 8px;
@@ -215,7 +221,8 @@
       cursor: pointer;
     }
     .filter-row select:focus,
-    .filter-row input[type="date"]:focus {
+    .filter-row input[type="date"]:focus,
+    .filter-row input[type="search"]:focus {
       outline: none;
       border-color: var(--accent);
     }
@@ -311,7 +318,7 @@
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
       gap: var(--sp-4);
-      padding: 0 var(--sp-6) var(--sp-6);
+      padding: var(--sp-4) var(--sp-6) var(--sp-6);
     }
     .chart-card {
       background: var(--bg);
@@ -477,11 +484,10 @@
 </head>
 <body class="app-fitness">
 
-<div class="app-wrapper">
-
 <!-- ================================================================
-     UPLOAD SCREEN
+     UPLOAD SCREEN  (centered, max-width)
 ================================================================ -->
+<div class="upload-wrapper">
 <div id="upload-screen">
   <div class="bs-card">
 
@@ -584,10 +590,11 @@
 
   </div><!-- /.bs-card -->
 </div><!-- /#upload-screen -->
+</div><!-- /.upload-wrapper -->
 
 
 <!-- ================================================================
-     DASHBOARD SCREEN
+     DASHBOARD SCREEN  (full-width)
 ================================================================ -->
 <div id="dashboard-screen">
   <div class="bs-card" style="margin-bottom:var(--sp-4);">
@@ -649,6 +656,7 @@
 
     <!-- Filter row -->
     <div class="filter-row">
+      <input type="search" id="filter-search" placeholder="Search activities&hellip;" style="flex:1;min-width:140px;max-width:260px;" />
       <label>Type</label>
       <select id="filter-type">
         <option value="All">All</option>
@@ -702,8 +710,6 @@
 
   </div><!-- /.bs-card -->
 </div><!-- /#dashboard-screen -->
-
-</div><!-- /.app-wrapper -->
 
 
 <!-- ================================================================

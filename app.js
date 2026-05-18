@@ -51,6 +51,7 @@ const filters = {
   type: 'All',
   from: null,
   to: null,
+  search: '',
 };
 
 /** Leaflet heatmap instance */
@@ -208,6 +209,7 @@ function flagDuplicates(activities) {
  * @returns {Activity[]}  Filtered subset, sorted newest first
  */
 function getFilteredActivities() {
+  const term = filters.search.toLowerCase().trim();
   return allActivities
     .filter(a => {
       if (filters.type !== 'All' && a.type !== filters.type) return false;
@@ -217,6 +219,7 @@ function getFilteredActivities() {
         toEnd.setHours(23, 59, 59, 999);
         if (a.date > toEnd) return false;
       }
+      if (term && !a.name.toLowerCase().includes(term) && !a.type.toLowerCase().includes(term)) return false;
       return true;
     })
     .sort((a, b) => b.date - a.date);
@@ -291,6 +294,12 @@ function showDashboard() {
   dash.classList.add('visible');
 
   refreshDashboard();
+
+  // Leaflet measures container size at init time — if the container was hidden,
+  // it gets 0×0 and tiles never render. Force a resize after the DOM paints.
+  setTimeout(() => {
+    if (heatmapInstance) heatmapInstance.invalidateSize();
+  }, 150);
 }
 
 function refreshDashboard() {
@@ -569,6 +578,12 @@ document.addEventListener('DOMContentLoaded', () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 
+  // Search
+  document.getElementById('filter-search').addEventListener('input', (e) => {
+    filters.search = e.target.value;
+    refreshDashboard();
+  });
+
   // Filters
   document.getElementById('filter-type').addEventListener('change', (e) => {
     filters.type = e.target.value;
@@ -586,12 +601,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-clear-filters').addEventListener('click', () => {
-    filters.type = 'All';
-    filters.from = null;
-    filters.to   = null;
-    document.getElementById('filter-type').value = 'All';
-    document.getElementById('filter-from').value = '';
-    document.getElementById('filter-to').value   = '';
+    filters.type   = 'All';
+    filters.from   = null;
+    filters.to     = null;
+    filters.search = '';
+    document.getElementById('filter-type').value   = 'All';
+    document.getElementById('filter-from').value   = '';
+    document.getElementById('filter-to').value     = '';
+    document.getElementById('filter-search').value = '';
     refreshDashboard();
   });
 
