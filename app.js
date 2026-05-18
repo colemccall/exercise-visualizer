@@ -970,11 +970,11 @@ function tlStep() {
 
   const color = TYPE_COLORS[act.type] || TYPE_COLORS.Other;
 
-  // Flash highlight
+  // Flash in bright, then settle to normal visible opacity
   poly.setStyle({ color: '#ffffff', weight: 4, opacity: 1 });
   setTimeout(() => {
     poly.setStyle({ color, weight: 2, opacity: 0.7 });
-  }, 350);
+  }, 300);
 
   tlUpdateUI(tlIdx);
   tlIdx++;
@@ -996,11 +996,9 @@ function tlPrepare() {
     return false;
   }
 
-  // Dim all polylines to start
+  // Hide all routes — they will appear one by one as the animation plays
   for (let i = 0; i < _renderedPolylines.length; i++) {
-    const act = _renderedActivities[i];
-    const color = TYPE_COLORS[act?.type] || TYPE_COLORS.Other;
-    _renderedPolylines[i]?.setStyle({ color, weight: 2, opacity: 0.15 });
+    _renderedPolylines[i]?.setStyle({ opacity: 0, weight: 2 });
   }
 
   tlIdx = 0;
