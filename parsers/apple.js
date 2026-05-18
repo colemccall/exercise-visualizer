@@ -60,25 +60,57 @@ function toMetres(value, unit) {
 
 // ── Chunked XML extraction ────────────────────────────────────────────────────
 /**
- * Extract all <Workout> element strings from potentially huge XML text
- * using a simple chunk-based regex scan.
+ * Stream <Workout> blocks out of a JSZip entry without ever building the
+ * full decompressed string. Apple Health XMLs can exceed JS's string length
+ * limit (~1 GB), so we use JSZip's internalStream to process uint8 chunks
+ * one at a time through TextDecoder, keeping only a small carry-over buffer.
  *
- * Strategy: scan the text for "<Workout " ... "</Workout>" pairs.
- * We process in 1MB chunks with overlap to avoid splitting across tags.
- *
- * @param {string} xmlText
- * @returns {string[]}  Raw XML strings for each <Workout> element
+ * @param {object} zipEntry  JSZip file entry
+ * @param {Function} onProgress  (bytesProcessed: number) => void
+ * @returns {Promise<string[]>}  Raw XML strings for each <Workout> element
  */
-function extractWorkoutStrings(xmlText) {
-  const workouts = [];
-  // Use a global regex that finds complete Workout blocks
-  // Apple workouts don't nest, so this is safe.
-  const regex = /<Workout\b[^>]*>[\s\S]*?<\/Workout>/g;
-  let match;
-  while ((match = regex.exec(xmlText)) !== null) {
-    workouts.push(match[0]);
-  }
-  return workouts;
+function streamWorkoutStrings(zipEntry, onProgress) {
+  return new Promise((resolve, reject) => {
+    const decoder = new TextDecoder('utf-8');
+    const workouts = [];
+    let overflow = ''; // tail from previous chunk that may contain a partial tag
+    let bytesProcessed = 0;
+
+    zipEntry.internalStream('uint8array')
+      .on('data', (chunk) => {
+        bytesProcessed += chunk.length;
+        onProgress(bytesProcessed);
+
+        // Decode this chunk (stream:true tells TextDecoder more bytes are coming)
+        const text = overflow + decoder.decode(chunk, { stream: true });
+        overflow = '';
+
+        let searchFrom = 0;
+        while (true) {
+          const start = text.indexOf('<Workout ', searchFrom);
+          if (start === -1) break;
+
+          const end = text.indexOf('</Workout>', start);
+          if (end === -1) {
+            // Workout block straddles a chunk boundary — carry it forward
+            overflow = text.slice(start);
+            break;
+          }
+
+          workouts.push(text.slice(start, end + '</Workout>'.length));
+          searchFrom = end + '</Workout>'.length;
+        }
+
+        // Keep enough tail to catch a '<Workout' that starts near the chunk end
+        if (overflow === '' && searchFrom < text.length) {
+          const keepFrom = Math.max(searchFrom, text.length - 300);
+          overflow = text.slice(keepFrom);
+        }
+      })
+      .on('error', reject)
+      .on('end', () => resolve(workouts))
+      .resume();
+  });
 }
 
 // ── Parse a single <Workout> XML string ──────────────────────────────────────
@@ -197,13 +229,16 @@ export async function parse(file, onProgress = () => {}) {
       return activities;
     }
 
-    onProgress(15, 'Reading export.xml (may be large)…');
-    const xmlText = await xmlEntry.async('string');
+    onProgress(15, 'Streaming export.xml…');
+    const totalSize = xmlEntry._data?.uncompressedSize || 0;
+    let streamedWorkouts = 0;
+    const workoutStrings = await streamWorkoutStrings(xmlEntry, (bytes) => {
+      const pct = totalSize ? Math.min(55, Math.round((bytes / totalSize) * 55)) : 0;
+      onProgress(15 + pct, `Scanning XML… ${streamedWorkouts} workouts found`);
+    });
+    streamedWorkouts = workoutStrings.length;
 
-    onProgress(30, 'Scanning for workouts…');
-    const workoutStrings = extractWorkoutStrings(xmlText);
-
-    onProgress(40, `Found ${workoutStrings.length} workouts, parsing…`);
+    onProgress(72, `Found ${workoutStrings.length} workouts, parsing…`);
 
     for (let i = 0; i < workoutStrings.length; i++) {
       const activity = parseWorkoutXml(workoutStrings[i], i);
@@ -244,7 +279,7 @@ export async function parse(file, onProgress = () => {}) {
       activities.push(activity);
 
       if (i % 100 === 0) {
-        onProgress(40 + Math.round((i / workoutStrings.length) * 55), `Parsed ${i} / ${workoutStrings.length} workouts…`);
+        onProgress(72 + Math.round((i / workoutStrings.length) * 25), `Parsed ${i} / ${workoutStrings.length} workouts…`);
       }
     }
   }
