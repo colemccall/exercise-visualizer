@@ -41,11 +41,12 @@ function mapType(stravaType) {
 }
 
 // ── Duration parsing ──────────────────────────────────────────────────────────
-// Strava exports duration as "H:MM:SS" or "M:SS" or plain seconds.
+// Strava exports duration as "H:MM:SS", "M:SS", plain seconds, or decimal seconds.
 function parseDuration(str) {
   if (!str) return 0;
   str = str.trim();
-  if (/^\d+$/.test(str)) return parseInt(str, 10);
+  // Plain integer or decimal seconds (e.g. "3452" or "3452.0")
+  if (/^\d+(\.\d+)?$/.test(str)) return Math.round(parseFloat(str));
   const parts = str.split(':').map(Number);
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
   if (parts.length === 2) return parts[0] * 60 + parts[1];
@@ -117,7 +118,11 @@ function parseCSV(text) {
     if (row.length === 1 && row[0] === '') continue; // skip empty rows
     const obj = {};
     headers.forEach((h, idx) => {
-      obj[h] = row[idx] !== undefined ? row[idx].trim() : '';
+      // First occurrence wins — Strava's extended export duplicates column names
+      // (e.g. two "Distance" columns: first is km, second is metres in extended format).
+      if (!(h in obj)) {
+        obj[h] = row[idx] !== undefined ? row[idx].trim() : '';
+      }
     });
     records.push(obj);
   }
@@ -233,10 +238,10 @@ function rowToActivity(row) {
   const name = row['Activity Name'] || row['name'] || 'Strava Activity';
   const type = mapType(row['Activity Type'] || row['type'] || '');
 
-  // Distance: Strava exports in miles in the activities.csv (regardless of
-  // the user's display unit preference). Convert miles → metres.
-  const distMi = parseFloat(row['Distance'] || row['distance'] || '0');
-  const distance_m = distMi * 1609.34;
+  // Distance: Strava's activities.csv first "Distance" column is in km.
+  // Convert km → metres.
+  const distKm = parseFloat(row['Distance'] || row['distance'] || '0');
+  const distance_m = distKm * 1000;
 
   // Duration: "Elapsed Time" is in seconds
   const duration_s = parseDuration(row['Elapsed Time'] || row['elapsed_time'] || '0');

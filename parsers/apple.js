@@ -100,10 +100,13 @@ function parseWorkoutXml(workoutXml, index) {
   const hkType   = attr('workoutActivityType');
   const startStr = attr('startDate');
   const endStr   = attr('endDate');
-  const distVal  = parseFloat(attr('totalDistance') || '0');
-  const distUnit = attr('totalDistanceUnit');
   const duration = parseFloat(attr('duration') || '0');
   const durUnit  = attr('durationUnit') || 'min';
+
+  // Distance is in a child WorkoutStatistics element, not a direct attribute.
+  const distMatch = workoutXml.match(/WorkoutStatistics\b[^>]*type="HKQuantityTypeIdentifierDistance[^"]*"[^>]*sum="([^"]*)"[^>]*unit="([^"]*)"/);
+  const distVal  = distMatch ? parseFloat(distMatch[1]) : 0;
+  const distUnit = distMatch ? distMatch[2] : null;
 
   if (!startStr) return null;
 
@@ -124,15 +127,21 @@ function parseWorkoutXml(workoutXml, index) {
   const avg_heart_rate = avgHRMatch ? Math.round(parseFloat(avgHRMatch[1])) : null;
   const max_heart_rate = maxHRMatch ? Math.round(parseFloat(maxHRMatch[1])) : null;
 
-  // Elevation gain — WorkoutStatistics for HKQuantityTypeIdentifierFlightsClimbed
-  // or custom metadata. Apple doesn't always export elevation as a statistic.
-  // Look for it in WorkoutEvent or Metadata.
-  const elevMatch = workoutXml.match(/HKMetadataKeyElevationAscended"[^>]*value="([^"]*)"/);
-  const elevation_gain_m = elevMatch ? parseFloat(elevMatch[1]) : null;
+  // Elevation gain — stored as MetadataEntry with key "HKElevationAscended",
+  // value format is "<number> <unit>" e.g. "11351 cm" or "113.51 m".
+  const elevMatch = workoutXml.match(/key="HKElevationAscended"\s+value="([^"]*)"/);
+  let elevation_gain_m = null;
+  if (elevMatch) {
+    const parts = elevMatch[1].trim().split(/\s+/);
+    const elevVal = parseFloat(parts[0]);
+    const elevUnit = (parts[1] || 'm').toLowerCase();
+    if (!isNaN(elevVal)) {
+      elevation_gain_m = elevUnit === 'cm' ? elevVal / 100 : elevVal;
+    }
+  }
 
-  // Route file reference — WorkoutRoute elements contain GPX file references
-  // The actual file path will be resolved when we process zip entries
-  const routeFileMatch = workoutXml.match(/<WorkoutRoute\b[^>]*filePath="([^"]*)"/);
+  // Route file reference — inside <WorkoutRoute> as <FileReference path="..."/>
+  const routeFileMatch = workoutXml.match(/<FileReference\b[^>]*path="([^"]*)"/);
   const gpx_file = routeFileMatch ? routeFileMatch[1] : null;
 
   const type = mapHKType(hkType || '');

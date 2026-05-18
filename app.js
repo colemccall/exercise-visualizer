@@ -70,10 +70,10 @@ function setupUploadZone(source) {
   const zone  = document.getElementById(`zone-${source}`);
   const input = document.getElementById(`file-${source}`);
 
-  // Click on zone → trigger file input
+  // Click on zone body (not the label or details) → trigger file input
   zone.addEventListener('click', (e) => {
-    // Don't trigger if clicking the <details> element
     if (e.target.closest('details')) return;
+    if (e.target.closest('label')) return; // label already handles the click natively
     input.click();
   });
 
@@ -144,7 +144,7 @@ async function handleFiles(source, files) {
 
   // Mark zone as loaded
   zone.classList.add('loaded');
-  sub.textContent = `${newActivities.length} activities loaded`;
+  sub.textContent = `${newActivities.length} loaded`;
 
   showToast(`Loaded ${newActivities.length} ${source} activities`);
 

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <style>
-    /* â”€â”€ App shell â”€â”€ */
+    /* -- App shell -- */
     body {
       background: var(--surface);
       min-height: 100vh;
@@ -27,7 +27,7 @@
       padding: var(--sp-6);
     }
 
-    /* â”€â”€ Upload screen â”€â”€ */
+    /* -- Upload screen -- */
     #upload-screen {
       max-width: 700px;
       margin: 40px auto;
@@ -35,6 +35,24 @@
 
     .upload-instructions {
       padding: var(--sp-5) var(--sp-6);
+    }
+
+    /* Explicit file-chooser button inside each upload zone */
+    .upload-choose-btn {
+      display: inline-block;
+      margin-top: var(--sp-2);
+      padding: 5px 14px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .upload-choose-btn:hover { opacity: 0.85; }
+    .bs-upload-zone.loaded .upload-choose-btn {
+      background: var(--correct);
     }
 
     details.how-to-export {
@@ -54,8 +72,8 @@
       user-select: none;
     }
     details.how-to-export summary::-webkit-details-marker { display: none; }
-    details.how-to-export summary::before { content: 'â–¶ '; font-size: 10px; }
-    details.how-to-export[open] summary::before { content: 'â–¼ '; }
+    details.how-to-export summary::before { content: '\25B6  '; font-size: 10px; }
+    details.how-to-export[open] summary::before { content: '\25BC  '; }
     details.how-to-export .export-body {
       padding: var(--sp-3);
       font-size: 12px;
@@ -95,7 +113,7 @@
       width: 0%;
     }
 
-    /* â”€â”€ Dashboard â”€â”€ */
+    /* -- Dashboard -- */
     #dashboard-screen { display: none; }
     #dashboard-screen.visible { display: block; }
 
@@ -337,7 +355,7 @@
       text-align: center;
     }
 
-    /* â”€â”€ Activity Detail Modal â”€â”€ */
+    /* -- Activity Detail Modal -- */
     #detail-overlay {
       position: fixed;
       inset: 0;
@@ -464,10 +482,11 @@
 </head>
 <body class="app-fitness">
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-     UPLOAD SCREEN
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
 <div class="app-wrapper">
+
+<!-- ================================================================
+     UPLOAD SCREEN
+================================================================ -->
 <div id="upload-screen">
   <div class="bs-card">
 
@@ -475,15 +494,15 @@
     <div class="bs-header">
       <div class="bs-header-top">
         <div>
-          <div class="bs-logo">ðŸƒ Fitness</div>
-          <div class="bs-logo-sub">Activity Visualizer â€” All processing happens in your browser</div>
+          <div class="bs-logo">&#127939; Fitness</div>
+          <div class="bs-logo-sub">Activity Visualizer &mdash; All processing happens in your browser</div>
         </div>
       </div>
     </div>
 
     <!-- Privacy notice -->
     <div class="bs-privacy" style="margin-top: var(--sp-5);">
-      <strong>ðŸ”’ 100% Private:</strong> Your fitness data is processed entirely in your browser.
+      <strong>&#128274; 100% Private:</strong> Your fitness data is processed entirely in your browser.
       No files are uploaded to any server. Your data never leaves your device.
     </div>
 
@@ -498,17 +517,18 @@
         <!-- Strava -->
         <div class="bs-upload-zone" id="zone-strava" data-source="strava">
           <input type="file" id="file-strava" accept=".zip,.csv,.gpx" style="display:none" multiple />
-          <div class="bs-upload-icon">ðŸŸ </div>
+          <div class="bs-upload-icon">&#129984;</div>
           <div class="bs-upload-name">Strava</div>
-          <div class="bs-upload-sub" id="sub-strava">Drop ZIP or CSV + GPX files</div>
+          <label for="file-strava" class="upload-choose-btn" id="sub-strava">Choose file</label>
+          <div class="bs-upload-sub" style="margin-top:2px;">or drag &amp; drop</div>
           <details class="how-to-export" style="margin-top:var(--sp-3); text-align:left;">
             <summary>How to export</summary>
             <div class="export-body">
               <ol>
-                <li>Go to <strong>strava.com</strong> â†’ Settings â†’ My Account</li>
+                <li>Go to <strong>strava.com</strong> &rarr; Settings &rarr; My Account</li>
                 <li>Scroll to "Download or Delete Your Account"</li>
                 <li>Click "Request Your Archive" and wait for an email</li>
-                <li>Download the ZIP file and drop it here, or drop the <code>activities.csv</code> file directly</li>
+                <li>Download the ZIP and drop it here, or drop <code>activities.csv</code> directly</li>
               </ol>
             </div>
           </details>
@@ -517,9 +537,10 @@
         <!-- Apple Health -->
         <div class="bs-upload-zone" id="zone-apple" data-source="apple">
           <input type="file" id="file-apple" accept=".zip,.xml" style="display:none" multiple />
-          <div class="bs-upload-icon">ðŸŽ</div>
+          <div class="bs-upload-icon">&#127822;</div>
           <div class="bs-upload-name">Apple Watch</div>
-          <div class="bs-upload-sub" id="sub-apple">Drop Health export ZIP or XML</div>
+          <label for="file-apple" class="upload-choose-btn" id="sub-apple">Choose file</label>
+          <div class="bs-upload-sub" style="margin-top:2px;">or drag &amp; drop</div>
           <details class="how-to-export" style="margin-top:var(--sp-3); text-align:left;">
             <summary>How to export</summary>
             <div class="export-body">
@@ -527,7 +548,7 @@
                 <li>Open the <strong>Health app</strong> on your iPhone</li>
                 <li>Tap your profile picture (top right)</li>
                 <li>Tap "Export All Health Data"</li>
-                <li>Share the resulting ZIP file to your computer and drop it here</li>
+                <li>Share the resulting ZIP to your computer and drop it here</li>
               </ol>
             </div>
           </details>
@@ -536,15 +557,16 @@
         <!-- Garmin -->
         <div class="bs-upload-zone" id="zone-garmin" data-source="garmin">
           <input type="file" id="file-garmin" accept=".zip,.json,.gpx" style="display:none" multiple />
-          <div class="bs-upload-icon">ðŸ”µ</div>
+          <div class="bs-upload-icon">&#128309;</div>
           <div class="bs-upload-name">Garmin</div>
-          <div class="bs-upload-sub" id="sub-garmin">Drop Garmin Connect ZIP or JSON</div>
+          <label for="file-garmin" class="upload-choose-btn" id="sub-garmin">Choose file</label>
+          <div class="bs-upload-sub" style="margin-top:2px;">or drag &amp; drop</div>
           <details class="how-to-export" style="margin-top:var(--sp-3); text-align:left;">
             <summary>How to export</summary>
             <div class="export-body">
               <ol>
                 <li>Go to <strong>connect.garmin.com</strong></li>
-                <li>Click your name â†’ Account Settings â†’ Data Management</li>
+                <li>Click your name &rarr; Account Settings &rarr; Data Management</li>
                 <li>Under "Export Your Data" click "Request Data Export"</li>
                 <li>Wait for an email with a download link, then drop the ZIP here</li>
               </ol>
@@ -556,7 +578,7 @@
 
       <!-- Progress bar -->
       <div id="progress-container" style="margin-top:var(--sp-4);">
-        <div class="progress-label" id="progress-label">Parsing filesâ€¦</div>
+        <div class="progress-label" id="progress-label">Parsing files&hellip;</div>
         <div class="progress-track">
           <div class="progress-fill" id="progress-fill"></div>
         </div>
@@ -568,9 +590,9 @@
 </div><!-- /#upload-screen -->
 
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+<!-- ================================================================
      DASHBOARD SCREEN
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+================================================================ -->
 <div id="dashboard-screen">
   <div class="bs-card" style="margin-bottom:var(--sp-4);">
 
@@ -578,7 +600,7 @@
     <div class="bs-header">
       <div class="bs-header-top">
         <div>
-          <div class="bs-logo">ðŸƒ Fitness</div>
+          <div class="bs-logo">&#127939; Fitness</div>
           <div class="bs-logo-sub">Activity Visualizer</div>
         </div>
         <div class="bs-badges" id="dash-source-badges"></div>
@@ -599,19 +621,19 @@
     <!-- Stats bar -->
     <div class="stats-bar">
       <div class="bs-stat">
-        <div class="bs-stat-num" id="stat-total">â€”</div>
+        <div class="bs-stat-num" id="stat-total">&mdash;</div>
         <div class="bs-stat-lbl">Activities</div>
       </div>
       <div class="bs-stat">
-        <div class="bs-stat-num" id="stat-distance">â€”</div>
+        <div class="bs-stat-num" id="stat-distance">&mdash;</div>
         <div class="bs-stat-lbl">Total Distance</div>
       </div>
       <div class="bs-stat">
-        <div class="bs-stat-num" id="stat-elevation">â€”</div>
+        <div class="bs-stat-num" id="stat-elevation">&mdash;</div>
         <div class="bs-stat-lbl">Elevation Gain</div>
       </div>
       <div class="bs-stat">
-        <div class="bs-stat-num" id="stat-range">â€”</div>
+        <div class="bs-stat-num" id="stat-range">&mdash;</div>
         <div class="bs-stat-lbl">Date Range</div>
       </div>
     </div>
@@ -681,12 +703,13 @@
 
   </div><!-- /.bs-card -->
 </div><!-- /#dashboard-screen -->
+
 </div><!-- /.app-wrapper -->
 
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+<!-- ================================================================
      ACTIVITY DETAIL PANEL (slide-in)
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+================================================================ -->
 <div id="detail-overlay">
   <div id="detail-panel">
 
@@ -695,7 +718,7 @@
         <div class="detail-title" id="detail-name">Activity</div>
         <div class="detail-subtitle" id="detail-meta"></div>
       </div>
-      <button class="detail-close" id="btn-close-detail">âœ•</button>
+      <button class="detail-close" id="btn-close-detail">&times;</button>
     </div>
 
     <!-- Route map -->
@@ -704,27 +727,27 @@
     <!-- Stats grid -->
     <div class="detail-stats">
       <div class="bs-stat">
-        <div class="bs-stat-num" id="dstat-distance">â€”</div>
+        <div class="bs-stat-num" id="dstat-distance">&mdash;</div>
         <div class="bs-stat-lbl">Distance</div>
       </div>
       <div class="bs-stat">
-        <div class="bs-stat-num" id="dstat-duration">â€”</div>
+        <div class="bs-stat-num" id="dstat-duration">&mdash;</div>
         <div class="bs-stat-lbl">Duration</div>
       </div>
       <div class="bs-stat">
-        <div class="bs-stat-num" id="dstat-pace">â€”</div>
+        <div class="bs-stat-num" id="dstat-pace">&mdash;</div>
         <div class="bs-stat-lbl">Avg Pace</div>
       </div>
       <div class="bs-stat">
-        <div class="bs-stat-num" id="dstat-elevation">â€”</div>
+        <div class="bs-stat-num" id="dstat-elevation">&mdash;</div>
         <div class="bs-stat-lbl">Elev Gain</div>
       </div>
       <div class="bs-stat">
-        <div class="bs-stat-num" id="dstat-avg-hr">â€”</div>
+        <div class="bs-stat-num" id="dstat-avg-hr">&mdash;</div>
         <div class="bs-stat-lbl">Avg HR</div>
       </div>
       <div class="bs-stat">
-        <div class="bs-stat-num" id="dstat-max-hr">â€”</div>
+        <div class="bs-stat-num" id="dstat-max-hr">&mdash;</div>
         <div class="bs-stat-lbl">Max HR</div>
       </div>
     </div>
@@ -749,9 +772,9 @@
 <div id="bs-toast"></div>
 
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+<!-- ================================================================
      EXTERNAL LIBRARIES (CDN)
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+================================================================ -->
 <!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <!-- JSZip -->
@@ -761,4 +784,3 @@
 <script type="module" src="app.js"></script>
 </body>
 </html>
-
