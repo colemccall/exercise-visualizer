@@ -754,7 +754,7 @@ export function tlPlay() {
     if (!tlPrepare()) return;
   }
 
-  if (btn) btn.textContent = '⏸ Pause';
+  if (btn) btn.innerHTML = '&#9646;&#9646; Pause';
   tlStep();
 }
 
@@ -762,7 +762,7 @@ export function tlPause() {
   clearTimeout(tlTimer);
   tlTimer = null;
   const btn = document.getElementById('tl-play-btn');
-  if (btn) btn.textContent = '▶ Play';
+  if (btn) btn.innerHTML = '&#9654; Play';
 }
 
 export function tlStop() {
@@ -772,13 +772,13 @@ export function tlStop() {
   tlRoutes = [];
 
   const btn = document.getElementById('tl-play-btn');
-  if (btn) btn.textContent = '▶ Play';
+  if (btn) btn.innerHTML = '&#9654; Play';
 
   const bar = document.getElementById('tl-progress-bar');
   if (bar) bar.style.width = '0%';
 
   const label = document.getElementById('tl-date-label');
-  if (label) label.textContent = '';
+  if (label) label.textContent = 'Press Play to animate routes chronologically';
 
   const count = document.getElementById('tl-count-label');
   if (count) count.textContent = '';
@@ -883,7 +883,7 @@ async function renderLocationsPanel(activities) {
   const maxCount = locs[0].count;
 
   container.innerHTML = locs.map((loc, i) => `
-    <div class="loc-row" data-key="${escapeHtml(loc.key)}" data-lat="${loc.lat}" data-lng="${loc.lng}" title="Click to filter">
+    <div class="loc-row" data-lat="${loc.lat}" data-lng="${loc.lng}" title="Click to zoom map here">
       <div class="loc-rank">${i + 1}</div>
       <div class="loc-info">
         <div class="loc-name">${escapeHtml(loc.name)}</div>
@@ -892,6 +892,7 @@ async function renderLocationsPanel(activities) {
         </div>
       </div>
       <div class="loc-count">${loc.count}</div>
+      <div class="loc-zoom">&#8599;</div>
     </div>
   `).join('');
 
@@ -900,8 +901,12 @@ async function renderLocationsPanel(activities) {
     row.addEventListener('click', () => {
       const lat = parseFloat(row.dataset.lat);
       const lng = parseFloat(row.dataset.lng);
-      if (heatmapInstance && !isNaN(lat) && !isNaN(lng)) {
-        heatmapInstance.setView([lat, lng], 11, { animate: true });
+      if (!isNaN(lat) && !isNaN(lng)) {
+        if (heatmapInstance) {
+          heatmapInstance.setView([lat, lng], 11, { animate: true });
+        }
+        // Scroll so the map is visible
+        document.getElementById('heatmap-container')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     });
   });
