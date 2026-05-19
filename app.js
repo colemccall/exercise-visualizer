@@ -885,6 +885,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Dark/light mode
   applyTheme();
   document.getElementById('btn-theme-toggle')?.addEventListener('click', toggleTheme);
+  document.getElementById('btn-theme-toggle-upload')?.addEventListener('click', toggleTheme);
 
   // Explore panel tabs
   initExplorePanel();
@@ -1197,8 +1198,10 @@ let _darkMode = localStorage.getItem('fitness-theme') === 'dark';
 
 function applyTheme() {
   document.documentElement.classList.toggle('dark-mode', _darkMode);
-  const btn = document.getElementById('btn-theme-toggle');
-  if (btn) btn.textContent = _darkMode ? '☀ Light' : '🌙 Dark';
+  const label = _darkMode ? '☀ Light' : '🌙 Dark';
+  document.querySelectorAll('#btn-theme-toggle, #btn-theme-toggle-upload').forEach(btn => {
+    if (btn) btn.textContent = label;
+  });
 }
 
 function toggleTheme() {

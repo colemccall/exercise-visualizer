@@ -42,33 +42,63 @@
       padding: var(--sp-5) var(--sp-6);
     }
 
-    /* Explicit file-chooser button inside each upload zone */
+    /* ── Upload screen overrides ── */
+
+    /* 2-source upload grid */
+    .bs-upload-zones { grid-template-columns: repeat(2, 1fr) !important; max-width: 560px; }
+
+    /* Override zone hover: use border highlight only — avoids all text contrast issues */
+    .bs-upload-zone:hover {
+      border-color: var(--accent);
+      background: var(--bg);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+    }
+    .bs-upload-zone.staged {
+      border-style: solid;
+      border-color: var(--accent);
+      background: var(--bg);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+    }
+    .bs-upload-zone.drag-over {
+      border-color: var(--accent);
+      background: var(--bg);
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
+    }
+
+    /* File chooser button */
     .upload-choose-btn {
       display: inline-block;
-      margin-top: var(--sp-2);
-      padding: 10px 22px;
+      margin-top: var(--sp-3);
+      padding: 10px 24px;
       background: var(--accent);
       color: #fff;
       font-size: 13px;
       font-weight: 700;
       border-radius: var(--radius-sm);
       cursor: pointer;
-      transition: opacity 0.15s;
+      transition: background 0.15s, opacity 0.15s;
       min-width: 160px;
       text-align: center;
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
+      user-select: none;
     }
-    .upload-choose-btn:hover { opacity: 0.85; }
+    .upload-choose-btn:hover { opacity: 0.88; }
     .upload-choose-btn:active { opacity: 0.7; }
-    .bs-upload-zone.loaded .upload-choose-btn {
-      background: var(--correct);
-    }
-    /* Ensure button stays visible regardless of zone hover background */
-    .bs-upload-zone:hover .upload-choose-btn {
-      box-shadow: 0 0 0 2px rgba(255,255,255,0.4);
+    .bs-upload-zone.loaded .upload-choose-btn { background: var(--correct); }
+
+    /* Staged file list */
+    .staged-file-list { margin-top: var(--sp-2); width: 100%; text-align: left; }
+    .staged-file {
+      font-size: 11px;
+      color: var(--text-mid);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding: 2px 0;
     }
 
+    /* How-to-export accordion */
     details.how-to-export {
       margin-top: var(--sp-3);
       border: 1px solid var(--border);
@@ -80,11 +110,13 @@
       cursor: pointer;
       font-size: 12px;
       font-weight: 600;
-      color: var(--accent);
-      background: var(--surface);
+      color: var(--text-mid);
+      background: var(--bg);
       list-style: none;
       user-select: none;
+      transition: color 0.12s;
     }
+    details.how-to-export summary:hover { color: var(--accent); }
     details.how-to-export summary::-webkit-details-marker { display: none; }
     details.how-to-export summary::before { content: '\25B6  '; font-size: 10px; }
     details.how-to-export[open] summary::before { content: '\25BC  '; }
@@ -93,41 +125,11 @@
       font-size: 12px;
       color: var(--text-mid);
       line-height: 1.6;
-      background: var(--bg);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
     }
-    details.how-to-export .export-body ol {
-      padding-left: var(--sp-5);
-    }
-    details.how-to-export .export-body li {
-      margin-bottom: var(--sp-1);
-    }
-
-    /* 2-source upload grid */
-    .bs-upload-zones { grid-template-columns: repeat(2, 1fr) !important; max-width: 560px; }
-
-    /* Staged file list inside upload zone */
-    .staged-file-list {
-      margin-top: var(--sp-2);
-      width: 100%;
-      text-align: left;
-    }
-    .staged-file {
-      font-size: 10px;
-      color: var(--text-mid);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      padding: 1px 0;
-    }
-    .bs-upload-zone.staged {
-      border-style: solid;
-      border-color: var(--accent);
-      background: var(--accent-light);
-    }
-    .bs-upload-zone.drag-over {
-      border-color: var(--accent);
-      background: var(--accent-light);
-    }
+    details.how-to-export .export-body ol { padding-left: var(--sp-5); }
+    details.how-to-export .export-body li { margin-bottom: var(--sp-1); }
 
     /* Go button row */
     .go-row {
@@ -922,14 +924,10 @@
 <div id="upload-screen">
   <div class="bs-card">
 
-    <!-- Header -->
-    <div class="bs-header">
-      <div class="bs-header-top">
-        <div>
-          <div class="bs-logo">&#127939; Fitness</div>
-          <div class="bs-logo-sub">Activity Visualizer &mdash; All processing happens in your browser</div>
-        </div>
-      </div>
+    <!-- Upload screen header -->
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:var(--sp-4) var(--sp-6); border-bottom:1px solid var(--border);">
+      <span style="font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--text); letter-spacing:0.02em;">&#127939; Fitness Visualizer</span>
+      <button class="tl-btn" id="btn-theme-toggle-upload" style="font-size:12px;">🌙 Dark</button>
     </div>
 
     <!-- Privacy notice -->
