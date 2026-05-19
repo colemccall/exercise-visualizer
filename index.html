@@ -46,16 +46,21 @@
     .upload-choose-btn {
       display: inline-block;
       margin-top: var(--sp-2);
-      padding: 5px 14px;
+      padding: 10px 22px;
       background: var(--accent);
       color: #fff;
-      font-size: 11px;
+      font-size: 13px;
       font-weight: 700;
       border-radius: var(--radius-sm);
       cursor: pointer;
       transition: opacity 0.15s;
+      min-width: 160px;
+      text-align: center;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
     }
     .upload-choose-btn:hover { opacity: 0.85; }
+    .upload-choose-btn:active { opacity: 0.7; }
     .bs-upload-zone.loaded .upload-choose-btn {
       background: var(--correct);
     }
@@ -151,9 +156,9 @@
       background: linear-gradient(135deg, var(--grad-a), var(--grad-b));
       color: #fff;
       cursor: pointer;
-      box-shadow: 0 4px 20px rgba(220,38,38,0.35);
+      box-shadow: 0 4px 20px rgba(37,99,235,0.35);
     }
-    .go-btn.ready:hover { opacity: 0.9; transform: translateY(-2px); box-shadow: 0 6px 28px rgba(220,38,38,0.45); }
+    .go-btn.ready:hover { opacity: 0.9; transform: translateY(-2px); box-shadow: 0 6px 28px rgba(37,99,235,0.45); }
     .go-btn.ready:active { transform: translateY(0); }
 
     /* Duplicate banner */
@@ -929,7 +934,7 @@
 
         <!-- Strava -->
         <div class="bs-upload-zone" id="zone-strava" data-source="strava">
-          <input type="file" id="file-strava" accept=".zip,.csv,.gpx" style="display:none" multiple />
+          <input type="file" id="file-strava" accept=".zip,.csv,.gpx" style="display:none" multiple aria-label="Choose Strava export file" />
           <div class="bs-upload-icon">&#129984;</div>
           <div class="bs-upload-name">Strava</div>
           <label for="file-strava" class="upload-choose-btn" id="sub-strava">Choose ZIP file</label>
@@ -950,7 +955,7 @@
 
         <!-- Apple Health -->
         <div class="bs-upload-zone" id="zone-apple" data-source="apple">
-          <input type="file" id="file-apple" accept=".zip,.xml" style="display:none" multiple />
+          <input type="file" id="file-apple" accept=".zip,.xml" style="display:none" multiple aria-label="Choose Apple Health export file" />
           <div class="bs-upload-icon">&#127822;</div>
           <div class="bs-upload-name">Apple Watch</div>
           <label for="file-apple" class="upload-choose-btn" id="sub-apple">Choose file</label>

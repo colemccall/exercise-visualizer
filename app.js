@@ -76,11 +76,8 @@ function setupUploadZone(source) {
   const zone  = document.getElementById(`zone-${source}`);
   const input = document.getElementById(`file-${source}`);
 
-  zone.addEventListener('click', (e) => {
-    if (e.target.closest('details')) return;
-    if (e.target.closest('label')) return;
-    input.click();
-  });
+  // Don't use programmatic input.click() — iOS Safari blocks it.
+  // The <label for="file-{source}"> in the HTML handles file picker activation natively.
 
   input.addEventListener('change', () => {
     if (input.files.length > 0) stageFiles(source, Array.from(input.files));
@@ -650,7 +647,7 @@ function applyHeatmapFilter(filtered) {
     if (!poly || !act) continue;
     const color = TYPE_COLORS[act.type] || TYPE_COLORS.Other;
     if (!hasFilter || filteredIds.has(act.id)) {
-      poly.setStyle({ color, weight: 1.5, opacity: 0.35 });
+      poly.setStyle({ color, weight: 1.5, opacity: 0.22 });
     } else {
       poly.setStyle({ color, weight: 1, opacity: 0.07 });
     }
@@ -969,7 +966,7 @@ function tlStep() {
   // Flash in bright, then settle to normal visible opacity
   poly.setStyle({ color: '#ffffff', weight: 4, opacity: 1 });
   setTimeout(() => {
-    poly.setStyle({ color, weight: 1.5, opacity: 0.35 });
+    poly.setStyle({ color, weight: 1.5, opacity: 0.22 });
   }, 300);
 
   tlUpdateUI(tlIdx);

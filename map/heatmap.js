@@ -93,7 +93,7 @@ export async function renderHeatmap(activities, map) {
       const color   = TYPE_COLORS[activity.type] || TYPE_COLORS.Other;
       const latLngs = pts.filter(p => p.lat !== null && p.lng !== null).map(p => [p.lat, p.lng]);
       if (latLngs.length < 2) continue;
-      const polyline = L.polyline(latLngs, { color, weight: 1.5, opacity: 0.35 });
+      const polyline = L.polyline(latLngs, { color, weight: 1.5, opacity: 0.22 });
       polyline.addTo(_routeLayerGroup);
       allLatLngs.push(...latLngs);
       _renderedPolylines.push(polyline);
