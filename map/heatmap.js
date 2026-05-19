@@ -24,10 +24,9 @@ function isDark() {
   return document.documentElement.classList.contains('dark-mode');
 }
 
-function tileUrl(dark) {
-  return dark
-    ? 'https://{s}.basemaps.cartocdn.com/dark_matter_lite/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+function tileUrl(_dark) {
+  // Same grey basemap for both modes — dark_matter_lite is charcoal/grey, not black
+  return 'https://{s}.basemaps.cartocdn.com/dark_matter_lite/{z}/{x}/{y}{r}.png';
 }
 
 const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>';
