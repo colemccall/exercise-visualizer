@@ -423,6 +423,7 @@ function refreshDashboard() {
 function updateSourceBadges() {
   const sources = [...new Set(allActivities.map(a => a.source))];
   const container = document.getElementById('dash-source-badges');
+  if (!container) return;
   container.innerHTML = sources.map(s => {
     const count = allActivities.filter(a => a.source === s).length;
     return `<span class="source-badge ${s}">${s} ${count}</span>`;
