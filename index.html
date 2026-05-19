@@ -64,6 +64,10 @@
     .bs-upload-zone.loaded .upload-choose-btn {
       background: var(--correct);
     }
+    /* Ensure button stays visible regardless of zone hover background */
+    .bs-upload-zone:hover .upload-choose-btn {
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.4);
+    }
 
     details.how-to-export {
       margin-top: var(--sp-3);
@@ -256,6 +260,16 @@
       gap: var(--sp-3);
       flex-wrap: wrap;
       padding: var(--sp-3) var(--sp-6) var(--sp-4);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .dash-title {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.02em;
+      margin-right: var(--sp-2);
     }
 
     .source-badges {
@@ -1004,19 +1018,9 @@
 <div id="dashboard-screen">
   <div class="bs-card" style="margin-bottom:var(--sp-4);">
 
-    <!-- Header -->
-    <div class="bs-header">
-      <div class="bs-header-top">
-        <div>
-          <div class="bs-logo">&#127939; Fitness</div>
-          <div class="bs-logo-sub">Activity Visualizer</div>
-        </div>
-        <div id="dash-source-badges" style="display:none"></div>
-      </div>
-    </div>
-
     <!-- Controls row -->
     <div class="header-controls">
+      <span class="dash-title">&#127939; Fitness Visualizer</span>
       <button class="bs-btn bs-btn-secondary" id="btn-new-upload" style="font-size:12px; padding:6px 14px;">
         + New Upload
       </button>

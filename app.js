@@ -375,11 +375,16 @@ function showDashboard() {
   const dash = document.getElementById('dashboard-screen');
   dash.classList.add('visible');
 
+  // Init map immediately while container is visible so invalidateSize works
+  if (!heatmapInstance) {
+    heatmapInstance = initHeatmap(document.getElementById('heatmap'));
+  }
+
   refreshDashboard();
   showDuplicateBanner();
 
   setTimeout(() => {
-    if (heatmapInstance) heatmapInstance.invalidateSize();
+    heatmapInstance.invalidateSize();
   }, 150);
 }
 
