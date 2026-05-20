@@ -34,12 +34,7 @@ const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">Open
 export function getHeatmapInstance() { return _map; }
 
 export function setHeatmapTheme(dark) {
-  if (!_map) return;
-  if (_tileLayer) _map.removeLayer(_tileLayer);
-  _tileLayer = L.tileLayer(tileUrl(dark), { attribution: TILE_ATTR, subdomains: 'abcd', maxZoom: 19 });
-  _tileLayer.addTo(_map);
-  // Bring route layer on top
-  if (_routeLayerGroup) _routeLayerGroup.bringToFront();
+  // Both modes use the same grey basemap — nothing to swap.
 }
 
 export function initHeatmap(container) {
