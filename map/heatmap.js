@@ -24,8 +24,16 @@ function isDark() {
   return document.documentElement.classList.contains('dark-mode');
 }
 
-function tileUrl(_dark) {
-  return 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+function tileUrl(dark) {
+  return dark
+    ? 'https://{s}.basemaps.cartocdn.com/dark_matter/{z}/{x}/{y}{r}.png'
+    : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+}
+
+export function routeStyle(dark) {
+  return dark
+    ? { weight: 1.5, opacity: 0.55 }  // brighter on dark
+    : { weight: 2,   opacity: 0.65 }; // stronger on light
 }
 
 const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>';
@@ -33,7 +41,18 @@ const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">Open
 export function getHeatmapInstance() { return _map; }
 
 export function setHeatmapTheme(dark) {
-  // Both modes use the same grey basemap — nothing to swap.
+  if (!_map) return;
+  if (_tileLayer) _map.removeLayer(_tileLayer);
+  _tileLayer = L.tileLayer(tileUrl(dark), { attribution: TILE_ATTR, subdomains: 'abcd', maxZoom: 19 });
+  _tileLayer.addTo(_map);
+  // Re-apply route opacity to match new basemap
+  const { weight, opacity } = routeStyle(dark);
+  _renderedPolylines.forEach((poly, i) => {
+    const act = _renderedActivities[i];
+    if (!poly || !act) return;
+    const color = TYPE_COLORS[act.type] || TYPE_COLORS.Other;
+    poly.setStyle({ color, weight, opacity });
+  });
 }
 
 export function initHeatmap(container) {
@@ -86,7 +105,8 @@ export async function renderHeatmap(activities, map) {
       const color   = TYPE_COLORS[activity.type] || TYPE_COLORS.Other;
       const latLngs = pts.filter(p => p.lat !== null && p.lng !== null).map(p => [p.lat, p.lng]);
       if (latLngs.length < 2) continue;
-      const polyline = L.polyline(latLngs, { color, weight: 1.5, opacity: 0.4 });
+      const { weight, opacity } = routeStyle(isDark());
+      const polyline = L.polyline(latLngs, { color, weight, opacity });
       polyline.addTo(_routeLayerGroup);
       allLatLngs.push(...latLngs);
       _renderedPolylines.push(polyline);

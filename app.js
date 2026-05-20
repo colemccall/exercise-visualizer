@@ -33,7 +33,7 @@ import { renderRecords }        from './charts/records.js';
 import { renderElevationChart, renderHRLineChart } from './charts/elevation.js';
 
 // ── Map imports ───────────────────────────────────────────────────────────────
-import { initHeatmap, renderHeatmap, setHeatmapTheme, _renderedPolylines, _renderedActivities, TYPE_COLORS } from './map/heatmap.js';
+import { initHeatmap, renderHeatmap, setHeatmapTheme, routeStyle, _renderedPolylines, _renderedActivities, TYPE_COLORS } from './map/heatmap.js';
 import { renderRoute }                from './map/route.js';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -653,7 +653,7 @@ function applyHeatmapFilter(filtered) {
     if (!poly || !act) continue;
     const color = TYPE_COLORS[act.type] || TYPE_COLORS.Other;
     if (!hasFilter || filteredIds.has(act.id)) {
-      poly.setStyle({ color, weight: 1.5, opacity: 0.4 });
+      poly.setStyle({ color, ...routeStyle(_darkMode) });
     } else {
       poly.setStyle({ color, weight: 1, opacity: 0.07 });
     }
@@ -973,7 +973,7 @@ function tlStep() {
   // Flash in bright, then settle to normal visible opacity
   poly.setStyle({ color: '#ffffff', weight: 4, opacity: 1 });
   setTimeout(() => {
-    poly.setStyle({ color, weight: 1.5, opacity: 0.4 });
+    poly.setStyle({ color, ...routeStyle(_darkMode) });
   }, 300);
 
   tlUpdateUI(tlIdx);
@@ -1048,7 +1048,7 @@ export function tlStop() {
   for (let i = 0; i < _renderedPolylines.length; i++) {
     const act = _renderedActivities[i];
     const color = TYPE_COLORS[act?.type] || TYPE_COLORS.Other;
-    _renderedPolylines[i]?.setStyle({ color, weight: 1.5, opacity: 0.35 });
+    _renderedPolylines[i]?.setStyle({ color, ...routeStyle(_darkMode) });
   }
 }
 
