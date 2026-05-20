@@ -25,8 +25,8 @@ function isDark() {
 }
 
 function tileUrl(_dark) {
-  // Same grey basemap for both modes — dark_matter_lite is charcoal/grey, not black
-  return 'https://{s}.basemaps.cartocdn.com/dark_matter_lite/{z}/{x}/{y}{r}.png';
+  // dark_matter_nolabels = full grey geography (roads, water, terrain) without text labels
+  return 'https://{s}.basemaps.cartocdn.com/dark_matter_nolabels/{z}/{x}/{y}{r}.png';
 }
 
 const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>';
