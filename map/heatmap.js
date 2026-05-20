@@ -24,11 +24,11 @@ function isDark() {
   return document.documentElement.classList.contains('dark-mode');
 }
 
-function tileUrl(dark) {
-  return dark
-    ? 'https://{s}.basemaps.cartocdn.com/dark_matter/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-}
+const ESRI_GRAY = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}';
+const ESRI_OPTS = { maxZoom: 16, attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ' };
+
+function tileUrl(_dark) { return ESRI_GRAY; }
+function tileOpts(_dark) { return ESRI_OPTS; }
 
 export function routeStyle(dark) {
   return dark
@@ -36,14 +36,13 @@ export function routeStyle(dark) {
     : { weight: 2,   opacity: 0.65 }; // stronger on light
 }
 
-const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>';
 
 export function getHeatmapInstance() { return _map; }
 
 export function setHeatmapTheme(dark) {
   if (!_map) return;
   if (_tileLayer) _map.removeLayer(_tileLayer);
-  _tileLayer = L.tileLayer(tileUrl(dark), { attribution: TILE_ATTR, subdomains: 'abcd', maxZoom: 19 });
+  _tileLayer = L.tileLayer(tileUrl(dark), tileOpts(isDark()));
   _tileLayer.addTo(_map);
   // Re-apply route opacity to match new basemap
   const { weight, opacity } = routeStyle(dark);
@@ -60,7 +59,7 @@ export function initHeatmap(container) {
 
   _map = L.map(container, { center: [20, 0], zoom: 2, zoomControl: true, attributionControl: true });
 
-  _tileLayer = L.tileLayer(tileUrl(isDark()), { attribution: TILE_ATTR, subdomains: 'abcd', maxZoom: 19 });
+  _tileLayer = L.tileLayer(tileUrl(isDark()), tileOpts(isDark()));
   _tileLayer.addTo(_map);
 
   _routeLayerGroup = L.layerGroup().addTo(_map);
