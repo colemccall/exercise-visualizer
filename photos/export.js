@@ -108,7 +108,11 @@ export async function exportTourVideo({ activity, opts = {} }) {
   }
   const routePts = (activity.route_points || []).filter(p => p.lat !== null && p.lng !== null);
   if (routePts.length === 0) throw new Error('Route has no valid points');
-  const route = routePts.map(p => [p.lat, p.lng]);
+  // Drop GPS spikes — a spike is a single point where going through it is
+  // >2x longer than skipping it AND the detour is >100m. Without this,
+  // the dot lurches out to the bad point and back mid-animation ("burst").
+  const rawRoute = routePts.map(p => [p.lat, p.lng]);
+  const route = filterGpsSpikes(rawRoute);
   const N = route.length;
 
   // Photos: keep only those with resolvable coordinates
@@ -288,7 +292,8 @@ export async function exportTourVideo({ activity, opts = {} }) {
   // the trip name the user typed (or a sensible fallback).
   if (intro) {
     const introMs = introSec * 1000;
-    const distStr = routeKm >= 1 ? `${routeKm.toFixed(1)} km` : `${Math.round(routeKm * 1000)} m`;
+    const routeMi = routeKm * 0.621371;
+    const distStr = routeMi >= 0.1 ? `${routeMi.toFixed(1)} mi` : `${Math.round(routeMi * 5280)} ft`;
     const durStr = activity.duration_s > 0 ? formatDuration(activity.duration_s) : '';
     const introTitle = userTitle || activity.name || `${activity.type} · ${formatShortDate(activity.date)}`;
     const introSubtitle = [formatShortDate(activity.date), distStr, durStr].filter(Boolean).join(' · ');
@@ -530,6 +535,30 @@ async function createScaledBitmap(sourceImg, targetW) {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(sourceImg, 0, 0, w, h);
   return canvas; // drawImage accepts HTMLCanvasElement too
+}
+
+/**
+ * Filter out isolated GPS spikes — points where the detour to reach them
+ * is >2x longer than skipping them AND the detour is at least 100m. Keeps
+ * the dot on the actual course; without this, a bad reading in the GPX
+ * causes the dot to lurch out and back ("burst") in the middle of a
+ * steady-pace traversal.
+ */
+function filterGpsSpikes(route) {
+  if (route.length < 3) return route;
+  const out = [route[0]];
+  for (let i = 1; i < route.length - 1; i++) {
+    const dPrev = haversine(route[i - 1], route[i]);
+    const dNext = haversine(route[i], route[i + 1]);
+    const dSkip = haversine(route[i - 1], route[i + 1]);
+    // Detour = extra distance from going through vs. skipping this point.
+    // If detour is > 100m AND going through is > 2× skipping, it's a spike.
+    const detour = (dPrev + dNext) - dSkip;
+    if (detour > 0.1 && (dPrev + dNext) > 2 * dSkip) continue;
+    out.push(route[i]);
+  }
+  out.push(route[route.length - 1]);
+  return out;
 }
 
 function nearestRouteIdx(route, latLng) {

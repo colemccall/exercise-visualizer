@@ -57,7 +57,7 @@ let photoBufferMinutes = 5;
 let photoMatchSummary = { matched: 0, unmatched: 0, activitiesWithPhotos: [] };
 
 /** @type {'metric'|'imperial'} */
-let units = localStorage.getItem('fitness-units') || 'metric';
+let units = localStorage.getItem('fitness-units') || 'imperial';
 
 /** Current filter state */
 const filters = {
