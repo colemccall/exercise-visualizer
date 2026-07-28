@@ -366,17 +366,20 @@ export async function exportTourVideo({ activity, opts = {} }) {
     } else {
       let fIdx, activeItem;
       if (seg.kind === 'transit') {
-        const local = (t - seg.startMs) / Math.max(1, seg.endMs - seg.startMs);
-        const eased = easeInOutCubic(Math.max(0, Math.min(1, local)));
+        const local = Math.max(0, Math.min(1, (t - seg.startMs) / Math.max(1, seg.endMs - seg.startMs)));
         if (pacing === 'steady') {
-          // Constant km/s regardless of GPX sampling density. Long pauses
-          // where GPS logged many close-together points are traversed
-          // quickly by the dot; sparse sections aren't fast-forwarded.
-          fIdx = fIdxAtDistanceBetween(cumKm, seg.fromIdx, seg.toIdx, eased);
+          // Truly constant km/s across ALL transits — LINEAR interp, no
+          // ease. Each transit's duration is already proportional to its
+          // distance, so linear means the dot moves at exactly the same
+          // km/s everywhere. No "car braking" deceleration before each
+          // photo hold — dot glides at one speed, snaps to a stop for
+          // the hold, snaps back to the same speed for the next transit.
+          fIdx = fIdxAtDistanceBetween(cumKm, seg.fromIdx, seg.toIdx, local);
         } else {
-          // 'actual' — index-linear interpolation. Where GPX has dense
-          // samples (rest, coffee break), the dot lingers at that spot,
-          // preserving the real-workout feel.
+          // 'actual' — index-linear (spends more time at densely-sampled
+          // points), with an ease-in/out for a gentler "in-and-out of
+          // each photo" feel that matches the real-workout vibe.
+          const eased = easeInOutCubic(local);
           fIdx = seg.fromIdx + (seg.toIdx - seg.fromIdx) * eased;
         }
         activeItem = null;
