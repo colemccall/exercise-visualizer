@@ -303,41 +303,48 @@ export async function exportTourVideo({ activity, opts = {} }) {
   }
   const finalTotalMs = segments.length ? segments[segments.length - 1].endMs : totalMs;
 
-  // Recording setup. We use captureStream(0) = manual frame capture so
-  // that we're in full control of the output frame rate — this avoids the
-  // "route stalls then jumps forward" behavior that came from tying our
-  // animation to wall-clock time. Each frame we draw explicitly triggers a
-  // capture via requestFrame(), so a slow draw = a slower render but a
-  // smooth playback video (no dropped frames, no fast-forward jumps).
+  // Encoding setup. We use the WebCodecs VideoEncoder + a JS-only WebM
+  // muxer instead of MediaRecorder. Why: MediaRecorder captures at wall-
+  // clock, so if drawing runs faster or slower than real time (or the
+  // browser is busy in another tab), the output video ends up variable-
+  // speed — the exact issue the user was hitting. WebCodecs lets us
+  // assign each encoded frame an explicit timestamp, so the output plays
+  // back at exactly FPS regardless of how long encoding took wall-clock.
   const canvas = document.createElement('canvas');
   canvas.width = size.w;
   canvas.height = size.h;
   const ctx = canvas.getContext('2d');
-  const stream = canvas.captureStream(0);
-  const videoTrack = stream.getVideoTracks()[0];
-  const supportsManualCapture = typeof videoTrack?.requestFrame === 'function';
-  if (!supportsManualCapture) {
-    // Safari fallback — auto-capture at FPS. Output may have dropped frames
-    // if drawing is slow, but at least it records.
-    stream.getVideoTracks().forEach(t => t.stop());
-    const fallbackStream = canvas.captureStream(FPS);
-    stream.addTrack(fallbackStream.getVideoTracks()[0]);
+
+  if (typeof VideoEncoder === 'undefined') {
+    try { stagingRoot.remove(); } catch {}
+    throw new Error('This browser does not support WebCodecs (needed for consistent video export). Please try Chrome, Edge, or Safari 16.4+.');
   }
-  const mimeType = pickMimeType();
-  const chunks = [];
-  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
-  recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-  const recordingDone = new Promise(resolve => { recorder.onstop = resolve; });
-  recorder.start(1000);
+
+  const { Muxer, ArrayBufferTarget } = await import(/* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/webm-muxer@5.0.3/build/webm-muxer.mjs');
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: { codec: 'V_VP9', width: size.w, height: size.h, frameRate: FPS },
+  });
+  const encoder = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error: (e) => console.error('[export] encoder error', e),
+  });
+  encoder.configure({
+    // VP9 profile 0, level 4.1, 8-bit — comfortably handles 720x1280@30
+    // (level 1.0 was too restrictive and the encoder rejected the config).
+    codec: 'vp09.00.41.08',
+    width: size.w,
+    height: size.h,
+    bitrate: 4_000_000,
+    framerate: FPS,
+    latencyMode: 'realtime',
+  });
 
   const frameDurationMs = 1000 / FPS;
+  const frameDurationUs = 1_000_000 / FPS;
   const totalFrames = Math.ceil(finalTotalMs / frameDurationMs);
-  const playingVideos = new Set();
+  const keyframeInterval = FPS * 2;
 
-  // Frame-count-based loop. `t` advances by exactly one frame per iteration
-  // regardless of how long the draw+capture actually takes. Yields to the
-  // browser between frames (via RAF) so the tab stays responsive and any
-  // playing <video> elements can advance their internal state.
   for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
     const t = frameIdx * frameDurationMs;
     const seg = findSegment(segments, t);
@@ -365,19 +372,13 @@ export async function exportTourVideo({ activity, opts = {} }) {
       } else {
         fIdx = seg.atIdx;
         activeItem = seg.item;
-        if (activeItem.isVideo && !playingVideos.has(activeItem.element)) {
-          try {
-            activeItem.element.currentTime = 0;
-            const p = activeItem.element.play();
-            if (p?.catch) p.catch(err => console.warn('[export] video play rejected', err));
-          } catch (err) {
-            console.warn('[export] video play threw', err);
-          }
-          playingVideos.add(activeItem.element);
+        // For a hold-video segment, seek the video element to the frame
+        // corresponding to (t - segStart). This gives us deterministic
+        // frames without depending on real-time playback.
+        if (activeItem.isVideo) {
+          const vidT = (t - seg.startMs) / 1000;
+          await seekVideoTo(activeItem.element, vidT);
         }
-      }
-      for (const v of playingVideos) {
-        if (activeItem?.element !== v) { try { v.pause(); } catch {} playingVideos.delete(v); }
       }
 
       const dotLatLng = routePosAtIdx(route, fIdx);
@@ -400,27 +401,32 @@ export async function exportTourVideo({ activity, opts = {} }) {
       });
     }
 
-    // Explicitly capture this canvas state as one video frame. Because
-    // requestFrame is called exactly once per iteration, the output video's
-    // frame count matches our loop's frame count — no drops, no jumps,
-    // and the video plays back at exactly FPS.
-    if (supportsManualCapture) {
-      try { videoTrack.requestFrame(); } catch {}
+    // Wrap the canvas as a VideoFrame with an explicit timestamp and hand
+    // it to the encoder. The muxer will emit frames at exactly these
+    // timestamps, so the output video plays back at exactly FPS.
+    const frame = new VideoFrame(canvas, { timestamp: Math.round(frameIdx * frameDurationUs) });
+    encoder.encode(frame, { keyFrame: frameIdx % keyframeInterval === 0 });
+    frame.close();
+
+    // If the encoder is falling behind, wait for it to drain a bit so we
+    // don't build up an unbounded queue. Only yields when queue is deep.
+    if (encoder.encodeQueueSize > 8) {
+      await new Promise(r => setTimeout(r, 0));
     }
 
-    onProgress(40 + Math.round((t / finalTotalMs) * 55), 'Recording…');
-
-    // Yield to the browser so RAF + video playback + UI can breathe.
-    await new Promise(r => requestAnimationFrame(r));
+    // Update progress and yield every 15 frames so the UI stays responsive
+    // and the browser gets a chance to process events.
+    if (frameIdx % 15 === 0) {
+      onProgress(40 + Math.round((frameIdx / totalFrames) * 55), 'Encoding…');
+      await new Promise(r => setTimeout(r, 0));
+    }
   }
-  playingVideos.forEach(v => { try { v.pause(); } catch {} });
 
-  recorder.stop();
-  await recordingDone;
-  stream.getTracks().forEach(t => t.stop());
+  await encoder.flush();
+  encoder.close();
+  muxer.finalize();
   onProgress(96, 'Finalizing…');
-  await new Promise(r => setTimeout(r, 150));
-  let blob = new Blob(chunks, { type: mimeType });
+  let blob = new Blob([muxer.target.buffer], { type: 'video/webm' });
   try { stagingRoot.remove(); } catch {}
 
   // MP4 "export" is a rename — we re-wrap the WebM bytes with an .mp4
@@ -448,17 +454,26 @@ export function downloadBlob(blob, filename) {
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-function pickMimeType() {
-  const candidates = [
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
-    'video/webm',
-    'video/mp4',
-  ];
-  for (const t of candidates) {
-    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) return t;
-  }
-  return 'video/webm';
+/**
+ * Seek a video element to `time` seconds and wait until the frame is
+ * available. Cheap on repeat seeks near the same time. Small safety
+ * timeout in case a codec's decoder stalls on a seek.
+ */
+function seekVideoTo(vid, time) {
+  const clamped = Math.max(0, Math.min((vid.duration || 0) - 0.01, time));
+  if (Math.abs(vid.currentTime - clamped) < 0.03) return Promise.resolve();
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      vid.removeEventListener('seeked', finish);
+      resolve();
+    };
+    vid.addEventListener('seeked', finish, { once: true });
+    setTimeout(finish, 400); // safety
+    try { vid.currentTime = clamped; } catch { finish(); }
+  });
 }
 
 function loadImage(url) {
