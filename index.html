@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Fitness Activity Visualizer</title>
 
+  <!-- Cross-Origin Isolation service worker.
+       Enables SharedArrayBuffer so ffmpeg.wasm (used for MP4 export)
+       can run on hosts like GitHub Pages that don't set COOP/COEP
+       headers themselves. Must load BEFORE any other script so it can
+       register + reload the page on first visit.  -->
+  <script src="./coi-serviceworker.js"></script>
+
   <!-- Google Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 

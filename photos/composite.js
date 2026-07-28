@@ -239,22 +239,23 @@ export function drawIntroText(ctx, { size, title, subtitle, alpha, accent = '#dc
   const barW = 60, barH = 4;
   ctx.fillRect((size.w - barW) / 2, size.h * 0.35, barW, barH);
 
-  // Title (wraps if very long)
+  // Title (wraps if very long). Sized so it doesn't dominate the frame —
+  // the map behind should stay readable through the scrim.
   ctx.fillStyle = '#ffffff';
-  const titleFont = 'bold 60px "Barlow Condensed", "Barlow", Impact, system-ui, sans-serif';
-  const lines = wrapText(ctx, (title || '').toUpperCase(), titleFont, size.w - 100);
+  const titleFont = '700 40px "Barlow Condensed", "Barlow", Impact, system-ui, sans-serif';
+  const lines = wrapText(ctx, (title || '').toUpperCase(), titleFont, size.w - 120);
   ctx.font = titleFont;
-  const lineH = 70;
-  const cy = size.h * 0.47;
+  const lineH = 48;
+  const cy = size.h * 0.48;
   const startY = cy - ((lines.length - 1) * lineH) / 2;
   for (let i = 0; i < lines.length; i++) {
     ctx.fillText(lines[i], size.w / 2, startY + i * lineH);
   }
 
   if (subtitle) {
-    ctx.font = '400 20px Inter, system-ui, sans-serif';
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.fillText(subtitle, size.w / 2, startY + lines.length * lineH + 10);
+    ctx.font = '400 16px Inter, system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText(subtitle, size.w / 2, startY + lines.length * lineH + 12);
   }
 
   ctx.restore();

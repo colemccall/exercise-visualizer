@@ -8,7 +8,7 @@
 import { renderRoute } from '../map/route.js';
 import { ensurePhotoURL } from './heic.js';
 import { ensureVideoPoster } from './video.js';
-import { exportTourVideo, downloadBlob, estimateExportDuration } from './export.js';
+import { exportTourVideo, downloadBlob } from './export.js';
 
 let _mapRef = null;
 let _tourIdx = 0; // index into entries for the current photo (for tile highlight)
@@ -131,13 +131,6 @@ export async function renderPhotosDetail(container, activity, opts) {
             <label>Pause on photos <span id="pd-share-hold-val">3s</span></label>
             <input type="range" id="pd-share-hold" min="1" max="8" step="1" value="3" />
           </div>
-          <div class="pd-share-row">
-            <label>Max video play time <span id="pd-share-vid-val">8s</span></label>
-            <input type="range" id="pd-share-vid" min="3" max="30" step="1" value="8" />
-          </div>
-          <div class="pd-share-estimate">
-            Estimated length: <span id="pd-share-estimate-val">—</span>
-          </div>
           <div class="pd-share-status" id="pd-share-status" hidden>
             <div class="pd-share-progress"><div id="pd-share-progress-fill"></div></div>
             <div id="pd-share-status-label" class="pd-share-status-label"></div>
@@ -254,28 +247,14 @@ function wireShareModal(container, activity) {
   const introRow = container.querySelector('#pd-share-intro-row');
   const speedIn = container.querySelector('#pd-share-speed');
   const holdIn  = container.querySelector('#pd-share-hold');
-  const vidIn   = container.querySelector('#pd-share-vid');
-
-  // Prefill trip name from the activity's title
-  if (titleIn && activity.name) titleIn.value = activity.name;
   const speedLbl = container.querySelector('#pd-share-speed-val');
   const holdLbl  = container.querySelector('#pd-share-hold-val');
-  const vidLbl   = container.querySelector('#pd-share-vid-val');
-  const estimateVal = container.querySelector('#pd-share-estimate-val');
   const statusEl = container.querySelector('#pd-share-status');
   const statusLbl = container.querySelector('#pd-share-status-label');
   const progFill  = container.querySelector('#pd-share-progress-fill');
 
-  const updateEstimate = () => {
-    const secs = estimateExportDuration(activity, {
-      animSpeed: +speedIn.value,
-      photoPauseSec: +holdIn.value,
-      videoPlaySec: +vidIn.value,
-      intro: introIn.checked,
-      introSec: +introLenIn.value,
-    });
-    estimateVal.textContent = `≈ ${secs}s`;
-  };
+  // Prefill trip name from the activity's title
+  if (titleIn && activity.name) titleIn.value = activity.name;
 
   const syncIntroVisibility = () => {
     introRow.style.display = introIn.checked ? '' : 'none';
@@ -289,16 +268,15 @@ function wireShareModal(container, activity) {
     progFill.style.width = '0%';
   };
 
-  openBtn.addEventListener('click', () => { modal.hidden = false; syncIntroVisibility(); updateEstimate(); });
+  openBtn.addEventListener('click', () => { modal.hidden = false; syncIntroVisibility(); });
   closeBtn.addEventListener('click', close);
   cancelBtn.addEventListener('click', close);
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
-  speedIn.addEventListener('input', () => { speedLbl.textContent = `${(+speedIn.value).toFixed(1)}×`; updateEstimate(); });
-  holdIn.addEventListener('input',  () => { holdLbl.textContent  = `${holdIn.value}s`; updateEstimate(); });
-  vidIn.addEventListener('input',   () => { vidLbl.textContent   = `${vidIn.value}s`; updateEstimate(); });
-  introIn.addEventListener('change', () => { syncIntroVisibility(); updateEstimate(); });
-  introLenIn.addEventListener('input', () => { introLenLbl.textContent = `${introLenIn.value}s`; updateEstimate(); });
+  speedIn.addEventListener('input', () => { speedLbl.textContent = `${(+speedIn.value).toFixed(1)}×`; });
+  holdIn.addEventListener('input',  () => { holdLbl.textContent  = `${holdIn.value}s`; });
+  introIn.addEventListener('change', syncIntroVisibility);
+  introLenIn.addEventListener('input', () => { introLenLbl.textContent = `${introLenIn.value}s`; });
 
   goBtn.addEventListener('click', async () => {
     goBtn.disabled = true;
@@ -316,7 +294,6 @@ function wireShareModal(container, activity) {
           introSec: +introLenIn.value,
           animSpeed: +speedIn.value,
           photoPauseSec: +holdIn.value,
-          videoPlaySec: +vidIn.value,
           onProgress: (pct, label) => {
             progFill.style.width = `${pct}%`;
             if (label) statusLbl.textContent = `${label} ${pct}%`;

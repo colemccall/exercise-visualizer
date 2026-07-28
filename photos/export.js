@@ -51,7 +51,11 @@ function computeTransitSec(routeKm, animSpeed) {
   return (routeKm * SEC_PER_KM_AT_1X) / Math.max(0.1, animSpeed);
 }
 
-export function estimateExportDuration(activity, { animSpeed = 1, photoPauseSec = 3, videoPlaySec = 8, intro = true, introSec = 3 } = {}) {
+// Kept internal — the modal used to display "≈ Ns" but the estimate
+// couldn't guarantee accuracy once we moved to frame-count-based rendering,
+// so it was removed from the UI. Still handy for debugging.
+// eslint-disable-next-line no-unused-vars
+function estimateExportDuration(activity, { animSpeed = 1, photoPauseSec = 3, videoPlaySec = 8, intro = true, introSec = 3 } = {}) {
   try {
     const route = (activity.route_points || []).filter(p => p.lat !== null && p.lng !== null);
     const routeKm = totalRouteKm(route);
@@ -87,7 +91,7 @@ export async function exportTourVideo({ activity, opts = {} }) {
   const size = opts.size || defaultSize();
   const animSpeed = opts.animSpeed ?? 1;
   const photoPauseMs = (opts.photoPauseSec ?? 3) * 1000;
-  const videoCapMs   = (opts.videoPlaySec ?? 8) * 1000;
+  const videoCapMs   = 20_000; // internal cap — videos longer than 20s truncate
   const mode         = opts.mode || 'overview'; // 'overview' | 'follow'
   const intro        = opts.intro !== false;    // default on
   const introSec     = opts.introSec ?? 3;
@@ -256,11 +260,24 @@ export async function exportTourVideo({ activity, opts = {} }) {
   tileSets.push(mainTiles);
 
   if (intro) {
-    onProgress(34, 'Loading intro tiles…');
+    // Load the wide "state/country" tileset AND an intermediate zoom
+    // level. drawBasemap picks the closest tileset per frame and scales,
+    // so having an in-between zoom means the intro's continuous zoom-in
+    // is never scaling tiles by more than ~2x — much cleaner than jumping
+    // from zoom 5 straight to zoom 12+.
+    onProgress(32, 'Loading intro tiles…');
     const wideTiles = await loadBasemapTiles(bbox, INTRO_WIDE_ZOOM, (frac) => {
-      onProgress(34 + Math.round(frac * 6), 'Loading intro tiles…');
+      onProgress(32 + Math.round(frac * 4), 'Loading intro tiles…');
     });
     tileSets.push(wideTiles);
+    const midZoom = Math.round((INTRO_WIDE_ZOOM + overviewZoom) / 2);
+    if (midZoom > INTRO_WIDE_ZOOM + 1 && midZoom < overviewZoom - 1) {
+      onProgress(36, 'Loading intro tiles…');
+      const midTiles = await loadBasemapTiles(bbox, midZoom, (frac) => {
+        onProgress(36 + Math.round(frac * 4), 'Loading intro tiles…');
+      });
+      tileSets.push(midTiles);
+    }
   }
   onProgress(40, 'Recording…');
 
@@ -286,12 +303,26 @@ export async function exportTourVideo({ activity, opts = {} }) {
   }
   const finalTotalMs = segments.length ? segments[segments.length - 1].endMs : totalMs;
 
-  // Recording setup
+  // Recording setup. We use captureStream(0) = manual frame capture so
+  // that we're in full control of the output frame rate — this avoids the
+  // "route stalls then jumps forward" behavior that came from tying our
+  // animation to wall-clock time. Each frame we draw explicitly triggers a
+  // capture via requestFrame(), so a slow draw = a slower render but a
+  // smooth playback video (no dropped frames, no fast-forward jumps).
   const canvas = document.createElement('canvas');
   canvas.width = size.w;
   canvas.height = size.h;
   const ctx = canvas.getContext('2d');
-  const stream = canvas.captureStream(FPS);
+  const stream = canvas.captureStream(0);
+  const videoTrack = stream.getVideoTracks()[0];
+  const supportsManualCapture = typeof videoTrack?.requestFrame === 'function';
+  if (!supportsManualCapture) {
+    // Safari fallback — auto-capture at FPS. Output may have dropped frames
+    // if drawing is slow, but at least it records.
+    stream.getVideoTracks().forEach(t => t.stop());
+    const fallbackStream = canvas.captureStream(FPS);
+    stream.addTrack(fallbackStream.getVideoTracks()[0]);
+  }
   const mimeType = pickMimeType();
   const chunks = [];
   const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
@@ -299,46 +330,32 @@ export async function exportTourVideo({ activity, opts = {} }) {
   const recordingDone = new Promise(resolve => { recorder.onstop = resolve; });
   recorder.start(1000);
 
-  const startedAt = performance.now();
+  const frameDurationMs = 1000 / FPS;
+  const totalFrames = Math.ceil(finalTotalMs / frameDurationMs);
   const playingVideos = new Set();
 
-  await new Promise(resolve => {
-    const tick = () => {
-      const now = performance.now();
-      const t = now - startedAt;
-      if (t >= finalTotalMs) {
-        playingVideos.forEach(v => { try { v.pause(); } catch {} });
-        return resolve();
-      }
-      const seg = findSegment(segments, t);
+  // Frame-count-based loop. `t` advances by exactly one frame per iteration
+  // regardless of how long the draw+capture actually takes. Yields to the
+  // browser between frames (via RAF) so the tab stays responsive and any
+  // playing <video> elements can advance their internal state.
+  for (let frameIdx = 0; frameIdx < totalFrames; frameIdx++) {
+    const t = frameIdx * frameDurationMs;
+    const seg = findSegment(segments, t);
 
-      // Intro segment: cinematic zoom-in. Camera starts at state-scale
-      // zoom and eases into the route's overview zoom over introSec.
-      // Text fades in fast, holds most of the intro, fades out at the end
-      // so the main animation snaps in cleanly.
-      if (seg.kind === 'intro') {
-        const local = (t - seg.startMs) / Math.max(1, seg.endMs - seg.startMs);
-        const zoom = seg.wideZoom + (seg.mainZoom - seg.wideZoom) * easeInOutCubic(local);
-        // Full-frame viewport so tiles fill the entire canvas
-        const introViewport = { x: 0, y: 0, w: size.w, h: size.h };
-        const camera = makeCamera(routeCenter, zoom, introViewport);
-        const textAlpha = local < 0.15 ? (local / 0.15)
-                        : local > 0.85 ? Math.max(0, 1 - (local - 0.85) / 0.15)
-                        : 1;
-        drawIntroFrame(ctx, {
-          size,
-          camera,
-          tileSet: tileSets,
-          route,
-          title: seg.title,
-          subtitle: seg.subtitle,
-          textAlpha,
-          accent: '#dc2626',
-        });
-        onProgress(40 + Math.round((t / finalTotalMs) * 55), 'Recording…');
-        return requestAnimationFrame(tick);
-      }
-
+    if (seg.kind === 'intro') {
+      const local = (t - seg.startMs) / Math.max(1, seg.endMs - seg.startMs);
+      const zoom = seg.wideZoom + (seg.mainZoom - seg.wideZoom) * easeInOutCubic(local);
+      const introViewport = { x: 0, y: 0, w: size.w, h: size.h };
+      const camera = makeCamera(routeCenter, zoom, introViewport);
+      const textAlpha = local < 0.15 ? (local / 0.15)
+                      : local > 0.85 ? Math.max(0, 1 - (local - 0.85) / 0.15)
+                      : 1;
+      drawIntroFrame(ctx, {
+        size, camera, tileSet: tileSets, route,
+        title: seg.title, subtitle: seg.subtitle,
+        textAlpha, accent: '#dc2626',
+      });
+    } else {
       let fIdx, activeItem;
       if (seg.kind === 'transit') {
         const local = (t - seg.startMs) / Math.max(1, seg.endMs - seg.startMs);
@@ -348,13 +365,11 @@ export async function exportTourVideo({ activity, opts = {} }) {
       } else {
         fIdx = seg.atIdx;
         activeItem = seg.item;
-        if (activeItem.isVideo && activeItem.element.paused && !playingVideos.has(activeItem.element)) {
+        if (activeItem.isVideo && !playingVideos.has(activeItem.element)) {
           try {
             activeItem.element.currentTime = 0;
-            const playPromise = activeItem.element.play();
-            if (playPromise && typeof playPromise.catch === 'function') {
-              playPromise.catch(err => console.warn('[export] video play rejected', err));
-            }
+            const p = activeItem.element.play();
+            if (p?.catch) p.catch(err => console.warn('[export] video play rejected', err));
           } catch (err) {
             console.warn('[export] video play threw', err);
           }
@@ -366,7 +381,6 @@ export async function exportTourVideo({ activity, opts = {} }) {
       }
 
       const dotLatLng = routePosAtIdx(route, fIdx);
-
       const camera = (mode === 'follow' && dotLatLng)
         ? makeCamera(dotLatLng, followZoom, mapViewport)
         : makeCamera(routeCenter, overviewZoom, mapViewport);
@@ -384,12 +398,22 @@ export async function exportTourVideo({ activity, opts = {} }) {
         title: userTitle || `${activity.type} · ${formatShortDate(activity.date)}`,
         themeAccent: '#dc2626',
       });
+    }
 
-      onProgress(40 + Math.round((t / finalTotalMs) * 55), 'Recording…');
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
+    // Explicitly capture this canvas state as one video frame. Because
+    // requestFrame is called exactly once per iteration, the output video's
+    // frame count matches our loop's frame count — no drops, no jumps,
+    // and the video plays back at exactly FPS.
+    if (supportsManualCapture) {
+      try { videoTrack.requestFrame(); } catch {}
+    }
+
+    onProgress(40 + Math.round((t / finalTotalMs) * 55), 'Recording…');
+
+    // Yield to the browser so RAF + video playback + UI can breathe.
+    await new Promise(r => requestAnimationFrame(r));
+  }
+  playingVideos.forEach(v => { try { v.pause(); } catch {} });
 
   recorder.stop();
   await recordingDone;
