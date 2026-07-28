@@ -45,6 +45,12 @@ export async function renderPhotosDetail(container, activity, opts) {
         <div class="pd-preview-caption" id="pd-preview-caption"></div>
       </div>
     </div>
+    <div class="cinema-controls" role="group" aria-label="Tour controls">
+      <button class="tl-btn" id="pd-cinema-prev" title="Previous">&larr;</button>
+      <button class="tl-btn" id="pd-cinema-pause" title="Pause tour">&#9646;&#9646;</button>
+      <button class="tl-btn" id="pd-cinema-next" title="Next">&rarr;</button>
+      <button class="tl-btn" id="pd-cinema-exit" title="Exit fullscreen">&times;</button>
+    </div>
 
     <div class="photos-detail-legend">
       <span><span class="pd-legend-dot solid"></span> EXIF GPS</span>
@@ -131,10 +137,14 @@ export async function renderPhotosDetail(container, activity, opts) {
     });
   }
 
-  // Tour controls
+  // Tour controls (header + floating cinema-mode set)
   container.querySelector('#pd-prev').addEventListener('click', () => stepTour(container, entries, -1));
   container.querySelector('#pd-next').addEventListener('click', () => stepTour(container, entries, +1));
   container.querySelector('#pd-play').addEventListener('click', () => toggleTour(container, entries));
+  container.querySelector('#pd-cinema-prev')?.addEventListener('click', () => stepTour(container, entries, -1));
+  container.querySelector('#pd-cinema-next')?.addEventListener('click', () => stepTour(container, entries, +1));
+  container.querySelector('#pd-cinema-pause')?.addEventListener('click', () => toggleTour(container, entries));
+  container.querySelector('#pd-cinema-exit')?.addEventListener('click', () => toggleTour(container, entries));
 
   // Lightbox close (stop any playing video)
   const lb = container.querySelector('#pd-lightbox');
@@ -154,7 +164,9 @@ function activate(container, entries, idx, { openLightbox, fly }) {
   tile?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
 
   if (fly && _mapRef) {
-    try { _mapRef.flyTo([photo.lat, photo.lng], 15, { duration: 1.0 }); } catch {}
+    // Zoom 13 shows the surrounding streets/terrain so you can identify
+    // where the photo was taken, not just the exact GPS pin.
+    try { _mapRef.flyTo([photo.lat, photo.lng], 13, { duration: 1.0 }); } catch {}
   }
   if (openLightbox) showLightbox(container, photo, playableURL);
 }
@@ -214,9 +226,21 @@ function toggleTour(container, entries) {
   if (!entries.length) return;
   _tourPlaying = true;
   if (btn) btn.innerHTML = '&#9646;&#9646; Pause';
+  enterCinema(container);
   showPreview(container, entries[_tourIdx]);
   activate(container, entries, _tourIdx, { openLightbox: false, fly: true });
   scheduleTourAdvance(container, entries);
+}
+
+function enterCinema(container) {
+  container.classList.add('cinema');
+  // Leaflet needs to re-measure its container after the size change.
+  setTimeout(() => { try { _mapRef?.invalidateSize(); } catch {} }, 240);
+}
+
+function exitCinema(container) {
+  container.classList.remove('cinema');
+  setTimeout(() => { try { _mapRef?.invalidateSize(); } catch {} }, 240);
 }
 
 function scheduleTourAdvance(container, entries) {
@@ -252,7 +276,10 @@ function stopTour(container) {
   clearTimeout(_tourTimer);
   _tourTimer = null;
   _tourPlaying = false;
-  if (container) hidePreview(container);
+  if (container) {
+    hidePreview(container);
+    exitCinema(container);
+  }
 }
 
 function showPreview(container, entry) {
@@ -273,7 +300,23 @@ function showPreview(container, entry) {
     v.muted = false;
     v.className = 'pd-preview-video';
     media.appendChild(v);
-    v.play?.().catch(() => {}); // some browsers reject unmuted autoplay
+    // Try unmuted first (Play button was a user gesture so this usually
+    // works). If the browser still blocks it, fall back to muted playback
+    // with a one-tap unmute hint.
+    v.play?.().catch(() => {
+      v.muted = true;
+      v.play?.().catch(() => {});
+      const hint = document.createElement('button');
+      hint.type = 'button';
+      hint.className = 'pd-preview-unmute';
+      hint.innerHTML = '🔇 Tap to unmute';
+      hint.addEventListener('click', () => {
+        v.muted = false;
+        v.play?.().catch(() => {});
+        hint.remove();
+      });
+      media.appendChild(hint);
+    });
   } else if (playableURL) {
     const img = document.createElement('img');
     img.src = playableURL;
