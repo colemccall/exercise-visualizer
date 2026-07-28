@@ -425,23 +425,56 @@ const TYPE_ICONS = {
   Other: '⚡',
 };
 
-function showDashboard() {
+async function showDashboard() {
   document.getElementById('upload-screen').style.display = 'none';
   const dash = document.getElementById('dashboard-screen');
   dash.classList.add('visible');
   document.getElementById('photos-screen')?.classList.remove('visible');
 
-  // Init map immediately while container is visible so invalidateSize works
+  // Init map immediately while container is visible so invalidateSize works.
+  // Pre-load the first routable activity's first trackpoint so the map opens
+  // near real data instead of flashing a world view at [20,0].
   if (!heatmapInstance) {
-    heatmapInstance = initHeatmap(document.getElementById('heatmap'));
+    const initialCenter = await getInitialMapCenter();
+    heatmapInstance = initHeatmap(
+      document.getElementById('heatmap'),
+      initialCenter ? { center: initialCenter, zoom: 11 } : {},
+    );
   }
 
   refreshDashboard();
   showDuplicateBanner();
 
+  // Land at the top of the page — otherwise browser scroll-restoration can
+  // leave the view on whatever chart was rendered last.
+  window.scrollTo({ top: 0, behavior: 'auto' });
+
   setTimeout(() => {
     heatmapInstance.invalidateSize();
   }, 150);
+}
+
+/**
+ * Look up the first routable activity and load its first GPX trackpoint.
+ * Returns [lat, lng] or null on failure. Cost: 1 GPX read (~50-200ms).
+ */
+async function getInitialMapCenter() {
+  const routable = allActivities.filter(a => a.has_route || a.route_points);
+  for (const act of routable) {
+    if (act.route_points && act.route_points.length) {
+      const p = act.route_points.find(x => x.lat !== null && x.lng !== null);
+      if (p) return [p.lat, p.lng];
+    }
+    if (typeof act._gpxLoader === 'function') {
+      try {
+        const pts = await act._gpxLoader();
+        act.route_points = pts;
+        const p = pts?.find(x => x.lat !== null && x.lng !== null);
+        if (p) return [p.lat, p.lng];
+      } catch { /* try next activity */ }
+    }
+  }
+  return null;
 }
 
 async function renderCurrentPhotosList() {
@@ -611,7 +644,7 @@ function renderCharts(activities) {
 
   renderDistanceChart(sorted, document.getElementById('chart-distance'), units);
   renderWeeklyChart(activities, document.getElementById('chart-weekly'));
-  renderRecords(activities, document.getElementById('chart-records'), units);
+  renderRecords(activities, document.getElementById('chart-records'), units, openDetail);
 
   // HR zones — only show if we have HR data
   const hasHR = activities.some(a => a.avg_heart_rate || (a.route_points && a.route_points.some(p => p.hr)));

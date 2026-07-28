@@ -12,6 +12,9 @@ import { ensureVideoPoster } from './video.js';
 let _tourTimer = null;
 let _tourIdx = 0;
 let _mapRef = null;
+let _tourPlaying = false;
+const PHOTO_HOLD_MS = 4000;
+const VIDEO_MAX_MS  = 20000;
 
 /**
  * @param {HTMLElement} container
@@ -35,7 +38,13 @@ export async function renderPhotosDetail(container, activity, opts) {
       </div>
     </div>
 
-    <div id="pd-map" class="photos-detail-map"></div>
+    <div class="photos-detail-mapwrap">
+      <div id="pd-map" class="photos-detail-map"></div>
+      <div id="pd-preview" class="pd-preview" hidden aria-hidden="true">
+        <div class="pd-preview-media" id="pd-preview-media"></div>
+        <div class="pd-preview-caption" id="pd-preview-caption"></div>
+      </div>
+    </div>
 
     <div class="photos-detail-legend">
       <span><span class="pd-legend-dot solid"></span> EXIF GPS</span>
@@ -55,7 +64,7 @@ export async function renderPhotosDetail(container, activity, opts) {
   `;
 
   container.querySelector('#pd-back').addEventListener('click', () => {
-    stopTour();
+    stopTour(container);
     opts.onBack();
   });
 
@@ -191,28 +200,105 @@ function stepTour(container, entries, delta) {
   if (!entries.length) return;
   const idx = (_tourIdx + delta + entries.length) % entries.length;
   activate(container, entries, idx, { openLightbox: false, fly: true });
+  // If tour is playing, restart the auto-advance timer around the new item.
+  if (_tourPlaying) scheduleTourAdvance(container, entries);
 }
 
 function toggleTour(container, entries) {
   const btn = container.querySelector('#pd-play');
-  if (_tourTimer) {
-    stopTour();
+  if (_tourPlaying) {
+    stopTour(container);
     if (btn) btn.innerHTML = '&#9654; Play';
     return;
   }
   if (!entries.length) return;
+  _tourPlaying = true;
   if (btn) btn.innerHTML = '&#9646;&#9646; Pause';
+  showPreview(container, entries[_tourIdx]);
   activate(container, entries, _tourIdx, { openLightbox: false, fly: true });
-  _tourTimer = setInterval(() => {
-    const next = (_tourIdx + 1) % entries.length;
-    activate(container, entries, next, { openLightbox: false, fly: true });
-  }, 4000);
+  scheduleTourAdvance(container, entries);
 }
 
-function stopTour() {
-  if (_tourTimer) clearInterval(_tourTimer);
+function scheduleTourAdvance(container, entries) {
+  clearTimeout(_tourTimer);
+  const entry = entries[_tourIdx];
+  const isVideo = !!entry.photo.isVideo;
+  const advance = () => {
+    if (!_tourPlaying) return;
+    const nextIdx = (_tourIdx + 1) % entries.length;
+    activate(container, entries, nextIdx, { openLightbox: false, fly: true });
+    showPreview(container, entries[nextIdx]);
+    scheduleTourAdvance(container, entries);
+  };
+  if (isVideo) {
+    // Wait for the video element in the preview to end (capped by VIDEO_MAX_MS).
+    const videoEl = container.querySelector('#pd-preview-media video');
+    if (videoEl) {
+      const onEnd = () => { videoEl.removeEventListener('ended', onEnd); advance(); };
+      videoEl.addEventListener('ended', onEnd);
+      _tourTimer = setTimeout(() => {
+        videoEl.removeEventListener('ended', onEnd);
+        advance();
+      }, VIDEO_MAX_MS);
+    } else {
+      _tourTimer = setTimeout(advance, PHOTO_HOLD_MS);
+    }
+  } else {
+    _tourTimer = setTimeout(advance, PHOTO_HOLD_MS);
+  }
+}
+
+function stopTour(container) {
+  clearTimeout(_tourTimer);
   _tourTimer = null;
-  _tourIdx = 0;
+  _tourPlaying = false;
+  if (container) hidePreview(container);
+}
+
+function showPreview(container, entry) {
+  if (!container || !entry) return;
+  const preview = container.querySelector('#pd-preview');
+  const media   = container.querySelector('#pd-preview-media');
+  const cap     = container.querySelector('#pd-preview-caption');
+  if (!preview || !media) return;
+
+  const { photo, playableURL } = entry;
+  media.innerHTML = '';
+  if (photo.isVideo && playableURL) {
+    const v = document.createElement('video');
+    v.src = playableURL;
+    v.autoplay = true;
+    v.controls = true;
+    v.playsInline = true;
+    v.muted = false;
+    v.className = 'pd-preview-video';
+    media.appendChild(v);
+    v.play?.().catch(() => {}); // some browsers reject unmuted autoplay
+  } else if (playableURL) {
+    const img = document.createElement('img');
+    img.src = playableURL;
+    img.alt = photo.name || '';
+    img.className = 'pd-preview-img';
+    media.appendChild(img);
+  } else {
+    const fallback = document.createElement('div');
+    fallback.className = 'pd-preview-fallback';
+    fallback.textContent = 'Preview unavailable';
+    media.appendChild(fallback);
+  }
+  const time = photo.timestamp ? photo.timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+  cap.textContent = time
+    ? `${time}${photo.interpolated ? ' · interpolated' : ''}`
+    : (photo.name || '');
+  preview.hidden = false;
+  preview.setAttribute('aria-hidden', 'false');
+}
+
+function hidePreview(container) {
+  const preview = container.querySelector('#pd-preview');
+  const media   = container.querySelector('#pd-preview-media');
+  if (preview) { preview.hidden = true; preview.setAttribute('aria-hidden', 'true'); }
+  if (media) media.innerHTML = ''; // stops any playing video
 }
 
 function formatDate(d) {

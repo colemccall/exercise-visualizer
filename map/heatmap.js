@@ -75,10 +75,20 @@ export function setHeatmapTheme(dark) {
   });
 }
 
-export function initHeatmap(container) {
+/**
+ * @param {HTMLElement} container
+ * @param {{center?: [number,number], zoom?: number}} [opts]
+ *   Pass a real center when you can — avoids the "world map at [20,0]" flash
+ *   before routes finish loading. fitBounds() will still tighten the view once
+ *   the first batch of routes is decoded.
+ */
+export function initHeatmap(container, opts = {}) {
   if (_map) { _map.remove(); _map = null; }
 
-  _map = L.map(container, { center: [20, 0], zoom: 2, zoomControl: true, attributionControl: true });
+  const center = opts.center || [20, 0];
+  const zoom   = opts.zoom ?? (opts.center ? 10 : 2);
+
+  _map = L.map(container, { center, zoom, zoomControl: true, attributionControl: true });
 
   _tileLayer = L.tileLayer(tileUrl(isDark()), tileOpts(isDark()));
   _tileLayer.addTo(_map);
