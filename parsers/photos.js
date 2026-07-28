@@ -66,33 +66,40 @@ export async function parse(input, onProgress = () => {}) {
 
     const heic = isHEICFile(file);
     const video = isVideoFile(file);
+
+    // Metadata is fetched in two calls:
+    //   1. exifr.parse() with a `pick` list for timestamp + tz fields.
+    //   2. exifr.gps() for GPS. The dedicated helper correctly applies
+    //      GPSLatitudeRef / GPSLongitudeRef so western/southern coords are
+    //      returned as negative numbers. Using parse() with picked GPS keys
+    //      returns unsigned magnitudes without applying the ref — which is
+    //      how Cincinnati photos ended up plotted in China.
     let meta = null;
+    let gps  = null;
     try {
       meta = await exifr.parse(file, {
-        // exifr v7 handles both image EXIF and video (MP4/MOV) atom metadata.
-        // For videos the useful keys are CreateDate + GPSLatitude/GPSLongitude.
         pick: [
           'DateTimeOriginal',
           'CreateDate',
           'CreationTime',
           'OffsetTimeOriginal',
           'OffsetTime',
-          'GPSLatitude',
-          'GPSLongitude',
-          'GPSLatitudeRef',
-          'GPSLongitudeRef',
         ],
         translateValues: true,
       });
     } catch (err) {
-      // Some formats fail silently; keep the item but without timestamp/GPS.
       console.warn('[photos] metadata parse failed for', file.name, err);
+    }
+    try {
+      gps = await exifr.gps(file);
+    } catch (err) {
+      // Non-fatal — item just won't have coordinates.
     }
 
     const timestamp = extractTimestamp(meta);
     const tzOffset  = meta?.OffsetTimeOriginal || meta?.OffsetTime || null;
-    const lat = numOrNull(meta?.GPSLatitude);
-    const lng = numOrNull(meta?.GPSLongitude);
+    const lat = numOrNull(gps?.latitude);
+    const lng = numOrNull(gps?.longitude);
     const hasGPS = lat !== null && lng !== null;
 
     // Non-HEIC images + videos: hand out an object URL immediately.
