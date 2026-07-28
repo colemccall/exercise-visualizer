@@ -190,10 +190,10 @@ export async function renderPhotosDetail(container, activity, opts) {
   // Tour controls (header + floating cinema-mode set)
   container.querySelector('#pd-prev').addEventListener('click', () => stepTour(container, entries, -1));
   container.querySelector('#pd-next').addEventListener('click', () => stepTour(container, entries, +1));
-  container.querySelector('#pd-play').addEventListener('click', () => toggleTour(container, entries));
+  container.querySelector('#pd-play').addEventListener('click', () => toggleTour(container, entries, activity));
   container.querySelector('#pd-cinema-prev')?.addEventListener('click', () => stepTour(container, entries, -1));
   container.querySelector('#pd-cinema-next')?.addEventListener('click', () => stepTour(container, entries, +1));
-  container.querySelector('#pd-cinema-pause')?.addEventListener('click', () => toggleTour(container, entries));
+  container.querySelector('#pd-cinema-pause')?.addEventListener('click', () => toggleTour(container, entries, activity));
   container.querySelector('#pd-cinema-exit')?.addEventListener('click', () => stopTour(container));
 
   // Lightbox close (stop any playing video)
@@ -353,32 +353,60 @@ function makeMarkerHTML(url, interpolated, isVideo) {
  * route[floor(idx)] → route[ceil(idx)] interpolated linearly, so it stays on
  * the polyline that Leaflet already drew.
  */
-function buildTourTimeline(route, entries) {
+function buildTourTimeline(routePts, entries) {
+  // routePts: array of {lat, lng, time?} from activity.route_points
+  // Preserve the FULL polyline as [lat,lng] pairs — the dot slides along
+  // this exact array. Sort chronologically (by photo timestamp) so what the
+  // user sees in the preview matches how the workout was actually lived.
+  const route = routePts.map(p => [p.lat, p.lng]);
   const N = route.length;
-  const fracs = entries.map(e => {
-    // Nearest route point index to photo's lat/lng
+
+  // Match each photo to a route index. Prefer nearest by TIMESTAMP when
+  // trackpoint times are available (correct on out-and-back routes where
+  // the same lat/lng appears twice); fall back to nearest lat/lng.
+  const hasTimes = routePts.some(p => p.time instanceof Date);
+  const idxForPhoto = (photo) => {
+    if (hasTimes && photo.timestamp instanceof Date) {
+      const t = photo.timestamp.getTime();
+      let bestIdx = 0, bestDT = Infinity;
+      for (let i = 0; i < N; i++) {
+        if (!(routePts[i].time instanceof Date)) continue;
+        const dt = Math.abs(routePts[i].time.getTime() - t);
+        if (dt < bestDT) { bestDT = dt; bestIdx = i; }
+      }
+      return bestIdx;
+    }
     let bestIdx = 0, bestDist = Infinity;
     for (let i = 0; i < N; i++) {
-      const dLat = route[i][0] - e.photo.lat;
-      const dLng = route[i][1] - e.photo.lng;
+      const dLat = route[i][0] - photo.lat;
+      const dLng = route[i][1] - photo.lng;
       const d = dLat * dLat + dLng * dLng;
       if (d < bestDist) { bestDist = d; bestIdx = i; }
     }
     return bestIdx;
+  };
+
+  const routeIdxs = entries.map(e => idxForPhoto(e.photo));
+
+  // Chronological order (what the user experienced). For out-and-back
+  // routes this may cause the dot to reverse direction — that's correct.
+  const order = entries.map((_, i) => i).sort((a, b) => {
+    const ta = entries[a].photo.timestamp?.getTime() ?? 0;
+    const tb = entries[b].photo.timestamp?.getTime() ?? 0;
+    return ta - tb;
   });
-  // Sort entries by their position along the route so the tour flows
-  // start → end (rather than by timestamp, which for out-and-back routes
-  // could zig-zag).
-  const order = entries.map((_, i) => i).sort((a, b) => fracs[a] - fracs[b]);
 
   const segments = [];
   let cursor = 0;
   let prevIdx = 0;
   for (const oi of order) {
     const entry = entries[oi];
-    const targetIdx = fracs[oi];
-    if (targetIdx > prevIdx) {
-      const transitMs = TRANSIT_TOTAL_MS * ((targetIdx - prevIdx) / Math.max(1, N - 1));
+    const targetIdx = routeIdxs[oi];
+    // Transit even if going "backwards" (targetIdx < prevIdx) — dot follows
+    // the route in reverse, which correctly represents an out-and-back.
+    const dist = Math.abs(targetIdx - prevIdx);
+    if (dist > 0) {
+      const transitMs = TRANSIT_TOTAL_MS * (dist / Math.max(1, N - 1));
       segments.push({
         kind: 'transit',
         startMs: cursor, endMs: cursor + transitMs,
@@ -387,7 +415,7 @@ function buildTourTimeline(route, entries) {
       cursor += transitMs;
     }
     const holdMs = entry.isVideo
-      ? Math.min(VIDEO_MAX_MS, (entry._videoDurationMs || (entry.photo.isVideo ? 5000 : PHOTO_HOLD_MS))) + VIDEO_TAIL_MS
+      ? Math.min(VIDEO_MAX_MS, PHOTO_HOLD_MS * 2) + VIDEO_TAIL_MS
       : PHOTO_HOLD_MS;
     segments.push({
       kind: 'hold',
@@ -399,9 +427,10 @@ function buildTourTimeline(route, entries) {
     cursor += holdMs;
     prevIdx = targetIdx;
   }
-  // Final transit to end of route
+  // Final transit to end of route (only if we're not already at the end)
   if (prevIdx < N - 1) {
-    const transitMs = TRANSIT_TOTAL_MS * ((N - 1 - prevIdx) / Math.max(1, N - 1));
+    const dist = (N - 1) - prevIdx;
+    const transitMs = TRANSIT_TOTAL_MS * (dist / Math.max(1, N - 1));
     segments.push({
       kind: 'transit',
       startMs: cursor, endMs: cursor + transitMs,
@@ -409,7 +438,7 @@ function buildTourTimeline(route, entries) {
     });
     cursor += transitMs;
   }
-  return { segments, totalMs: cursor };
+  return { segments, totalMs: cursor, route };
 }
 
 /** Interpolate along the route by continuous index (0..N-1). */
@@ -455,7 +484,7 @@ function seekToHold(container, entries, holdSeg) {
   }
 }
 
-function toggleTour(container, entries) {
+function toggleTour(container, entries, activity) {
   const playBtn = container.querySelector('#pd-play');
   const cinemaPauseBtn = container.querySelector('#pd-cinema-pause');
   if (_tour && _tour.running) {
@@ -471,18 +500,21 @@ function toggleTour(container, entries) {
     return;
   }
   if (!entries.length) return;
-  startTour(container, entries);
+  startTour(container, entries, activity);
   if (playBtn) playBtn.innerHTML = '&#9646;&#9646; Pause';
   if (cinemaPauseBtn) cinemaPauseBtn.innerHTML = '&#9646;&#9646;';
 }
 
-function startTour(container, entries) {
-  const route = _tour_extractRoute();
-  if (!route.length) {
+function startTour(container, entries, activity) {
+  // Prefer the activity's route_points (has timestamps) over reading back
+  // from the rendered Leaflet polyline — timestamps let us match photos to
+  // the correct route position on out-and-back routes.
+  const routePts = (activity?.route_points || []).filter(p => p.lat !== null && p.lng !== null);
+  if (routePts.length === 0) {
     console.warn('[tour] no route data — cannot animate');
     return;
   }
-  const { segments, totalMs } = buildTourTimeline(route, entries);
+  const { segments, totalMs, route } = buildTourTimeline(routePts, entries);
   _tour = {
     container, entries, route, segments, totalMs,
     startedAt: performance.now(),
@@ -492,9 +524,9 @@ function startTour(container, entries) {
     dotMarker: null,
     currentPhotoIdx: -1,
     currentSegKind: null,
+    activity,
   };
   enterCinema(container, 'full');
-  // Create the moving dot on the map
   if (_mapRef && route[0]) {
     _tour.dotMarker = L.circleMarker(route[0], {
       radius: 10,
@@ -504,10 +536,11 @@ function startTour(container, entries) {
       fillOpacity: 1,
       className: 'tour-dot-marker',
     }).addTo(_mapRef);
-    // Fit map to the whole route so we can see it all
+    // Fit map to the whole route so the entire path is visible while the
+    // dot traverses it. Reasonable maxZoom so short routes aren't extreme.
     try {
       const bounds = L.latLngBounds(route);
-      _mapRef.fitBounds(bounds, { padding: [40, 40], maxZoom: 15, animate: true });
+      _mapRef.fitBounds(bounds, { padding: [60, 60], maxZoom: 15, animate: true });
     } catch {}
   }
   _tour.rafId = requestAnimationFrame(tickTour);
@@ -582,6 +615,24 @@ function renderTourFrame(nowMs) {
       showPreview(_tour.container, entry);
       // Update tile highlight (visible when user later exits cinema)
       activate(_tour.container, _tour.entries, seg.entryIdx, { openLightbox: false, fly: false });
+      // Follow-cam: zoom in on the photo's location so it's clear where we
+      // are. During the following transit the map pans to the next photo,
+      // and the dot moves along the route in sync.
+      if (_mapRef && pos) {
+        try { _mapRef.flyTo(pos, 14, { duration: 0.6, animate: true }); } catch {}
+      }
+    }
+  } else if (seg.kind === 'transit') {
+    // On entry to a transit segment, start panning toward the destination
+    // photo so the map is roughly following the dot. flyTo runs on its own
+    // animation duration (matched to segment length).
+    if (_tour.lastTransitStart !== seg.startMs) {
+      _tour.lastTransitStart = seg.startMs;
+      const destPos = routePosAtIdx(_tour.route, seg.toRouteIdx);
+      if (_mapRef && destPos) {
+        const durSec = Math.max(0.5, (seg.endMs - seg.startMs) / 1000);
+        try { _mapRef.flyTo(destPos, 14, { duration: durSec, animate: true }); } catch {}
+      }
     }
   }
 }

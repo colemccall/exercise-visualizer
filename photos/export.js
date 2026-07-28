@@ -30,23 +30,36 @@ const FPS = 30;
  * Estimate total video length in seconds for the given params. Called live
  * from the modal as sliders move — no rendering.
  */
+/**
+ * Same base-transit formula used by exportTourVideo(). Keeping them
+ * synchronized here so the estimate matches the actual render.
+ */
+function computeBaseTransitSec(routeKm) {
+  // Slower default: 25s minimum, 90s max, scales with distance.
+  return Math.max(25, Math.min(90, 20 + Math.log2(routeKm + 1) * 6));
+}
+
 export function estimateExportDuration(activity, { animSpeed = 1, photoPauseSec = 3, videoPlaySec = 8 } = {}) {
-  const route = (activity.route_points || []).filter(p => p.lat !== null && p.lng !== null);
-  const routeKm = totalRouteKm(route);
-  const photos = (activity.photos || []);
-  const photoCount = photos.filter(p => !p.isVideo).length;
-  const videoCount = photos.filter(p => p.isVideo).length;
+  try {
+    const route = (activity.route_points || []).filter(p => p.lat !== null && p.lng !== null);
+    const routeKm = totalRouteKm(route);
+    const photos = (activity.photos || []);
+    const photoCount = photos.filter(p => !p.isVideo).length;
+    const videoCount = photos.filter(p => p.isVideo).length;
 
-  // Base transit time scales gently with route length (10s min, 45s max at 1x)
-  const baseTransitSec = Math.max(10, Math.min(45, 8 + Math.log2(routeKm + 1) * 3));
-  const transitSec = baseTransitSec / animSpeed;
+    const baseTransitSec = computeBaseTransitSec(routeKm);
+    const transitSec = baseTransitSec / animSpeed;
 
-  const photoTotal = photoCount * photoPauseSec;
-  // Assume videos play for videoPlaySec each (upper bound; real duration
-  // may be shorter and will just play through).
-  const videoTotal = videoCount * videoPlaySec;
+    const photoTotal = photoCount * photoPauseSec;
+    // Assume videos play for videoPlaySec each (upper bound; real duration
+    // may be shorter and will just play through).
+    const videoTotal = videoCount * videoPlaySec;
 
-  return Math.round(transitSec + photoTotal + videoTotal);
+    return Math.round(transitSec + photoTotal + videoTotal);
+  } catch (err) {
+    console.warn('[export] estimate failed', err);
+    return 0;
+  }
 }
 
 /**
@@ -85,6 +98,12 @@ export async function exportTourVideo({ activity, opts = {} }) {
 
   onProgress(5, 'Loading photos…');
   const preloaded = [];
+  const stagingRoot = document.createElement('div');
+  // Video elements need to be in the DOM for reliable playback across
+  // browsers. Park them off-screen. Cleaned up after recording.
+  stagingRoot.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;';
+  document.body.appendChild(stagingRoot);
+
   for (let i = 0; i < photos.length; i++) {
     const p = photos[i];
     const src = p._source || p;
@@ -98,15 +117,21 @@ export async function exportTourVideo({ activity, opts = {} }) {
         element.muted = true;
         element.playsInline = true;
         element.preload = 'auto';
+        element.crossOrigin = 'anonymous';
+        stagingRoot.appendChild(element);
+        // Wait until at least one frame is decoded so drawImage produces
+        // real pixels (not a black frame). HAVE_CURRENT_DATA = 2.
         await new Promise(resolve => {
-          if (element.readyState >= 1) return resolve();
-          element.addEventListener('loadedmetadata', resolve, { once: true });
-          element.addEventListener('error', resolve, { once: true });
+          const done = () => resolve();
+          if (element.readyState >= 2) return done();
+          element.addEventListener('loadeddata', done, { once: true });
+          element.addEventListener('canplay', done, { once: true });
+          element.addEventListener('error', done, { once: true });
+          setTimeout(done, 3000); // safety cap
         });
       } else {
         element = await loadImage(url);
       }
-      // Nearest route index for this photo — used as its route-index anchor
       preloaded.push({
         photo: p,
         element,
@@ -118,15 +143,19 @@ export async function exportTourVideo({ activity, opts = {} }) {
     }
     onProgress(5 + Math.round((i + 1) / Math.max(1, photos.length) * 15), 'Loading photos…');
   }
-  if (preloaded.length === 0) throw new Error('No renderable photos');
+  if (preloaded.length === 0) {
+    stagingRoot.remove();
+    throw new Error('No renderable photos');
+  }
 
   // Sort by route position (start → end); on out-and-back routes this
   // avoids the dot zig-zagging when photos aren't in strict time order.
   preloaded.sort((a, b) => a.routeIdx - b.routeIdx);
 
-  // Build timeline
+  // Build timeline — same base-transit formula as the estimator so the
+  // estimated length in the modal matches what actually renders.
   const routeKm = totalRouteKm(route);
-  const baseTransitMs = Math.max(10, Math.min(45, 8 + Math.log2(routeKm + 1) * 3)) * 1000;
+  const baseTransitMs = computeBaseTransitSec(routeKm) * 1000;
   const totalTransitMs = baseTransitMs / animSpeed;
 
   const segments = [];
@@ -168,13 +197,16 @@ export async function exportTourVideo({ activity, opts = {} }) {
   const totalMs = cursor;
 
   // Camera + basemap
+  // Use a single zoom that fits the whole route (no zoom animation) so the
+  // basemap is available for every frame. Camera is fixed on the route's
+  // center; the dot moves within the viewport as it traces the route.
   const mapViewport = { x: 24, y: 24, w: size.w - 48, h: Math.round(size.h * 0.55) };
   const bbox = computeBBox(route);
-  const wideZoom = bestZoomForBBox(bbox, mapViewport, 0.85);
-  const closeZoom = Math.min(wideZoom + 2, 17);
+  const fixedZoom = bestZoomForBBox(bbox, mapViewport, 0.85);
+  const routeCenter = [(bbox.minLat + bbox.maxLat) / 2, (bbox.minLng + bbox.maxLng) / 2];
 
   onProgress(22, 'Loading map tiles…');
-  const tileSet = await loadBasemapTiles(bbox, closeZoom, (frac) => {
+  const tileSet = await loadBasemapTiles(bbox, fixedZoom, (frac) => {
     onProgress(22 + Math.round(frac * 18), 'Loading map tiles…');
   });
   onProgress(40, 'Recording…');
@@ -215,7 +247,17 @@ export async function exportTourVideo({ activity, opts = {} }) {
         fIdx = seg.atIdx;
         activeItem = seg.item;
         if (activeItem.isVideo && activeItem.element.paused && !playingVideos.has(activeItem.element)) {
-          try { activeItem.element.currentTime = 0; activeItem.element.play(); } catch {}
+          try {
+            activeItem.element.currentTime = 0;
+            // Await the play promise but don't block the RAF — if it rejects
+            // we still draw the current frame each tick.
+            const playPromise = activeItem.element.play();
+            if (playPromise && typeof playPromise.catch === 'function') {
+              playPromise.catch(err => console.warn('[export] video play rejected', err));
+            }
+          } catch (err) {
+            console.warn('[export] video play threw', err);
+          }
           playingVideos.add(activeItem.element);
         }
       }
@@ -226,11 +268,10 @@ export async function exportTourVideo({ activity, opts = {} }) {
 
       const dotLatLng = routePosAtIdx(route, fIdx);
 
-      // Camera zoom: wide → close → wide across the whole video
-      const frac = t / totalMs;
-      const zoomEase = Math.sin(frac * Math.PI);
-      const zoomLevel = Math.round(wideZoom + (closeZoom - wideZoom) * zoomEase);
-      const camera = makeCamera(dotLatLng, zoomLevel, mapViewport);
+      // Fixed camera — whole route always in view; the moving dot shows
+      // progress. Basemap tiles are pre-loaded for exactly this zoom, so
+      // every frame has a proper map.
+      const camera = makeCamera(routeCenter, fixedZoom, mapViewport);
 
       const captionParts = [];
       if (activeItem?.photo?.timestamp) {
@@ -250,6 +291,7 @@ export async function exportTourVideo({ activity, opts = {} }) {
         themeAccent: '#dc2626',
       });
 
+      const frac = t / totalMs;
       onProgress(40 + Math.round(frac * 55), 'Recording…');
       requestAnimationFrame(tick);
     };
@@ -262,6 +304,8 @@ export async function exportTourVideo({ activity, opts = {} }) {
   onProgress(98, 'Finalizing…');
   await new Promise(r => setTimeout(r, 150));
   const blob = new Blob(chunks, { type: mimeType });
+  // Clean up any DOM-attached video elements
+  try { stagingRoot.remove(); } catch {}
   onProgress(100, 'Done');
   return blob;
 }
