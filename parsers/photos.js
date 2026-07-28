@@ -68,25 +68,31 @@ export async function parse(input, onProgress = () => {}) {
     const video = isVideoFile(file);
 
     // Metadata is fetched in two calls:
-    //   1. exifr.parse() with a `pick` list for timestamp + tz fields.
+    //   1. exifr.parse() for timestamp + tz fields. For images we use a
+    //      picked list (fast); for videos we parse everything, since
+    //      MP4/MOV use QuickTime-atom tag names (CreationDate,
+    //      MediaCreateDate, TrackCreateDate) that vary by encoder and
+    //      would need to be individually whitelisted.
     //   2. exifr.gps() for GPS. The dedicated helper correctly applies
-    //      GPSLatitudeRef / GPSLongitudeRef so western/southern coords are
-    //      returned as negative numbers. Using parse() with picked GPS keys
-    //      returns unsigned magnitudes without applying the ref — which is
-    //      how Cincinnati photos ended up plotted in China.
+    //      GPSLatitudeRef / GPSLongitudeRef so western/southern coords
+    //      are returned as negative numbers.
     let meta = null;
     let gps  = null;
     try {
-      meta = await exifr.parse(file, {
-        pick: [
-          'DateTimeOriginal',
-          'CreateDate',
-          'CreationTime',
-          'OffsetTimeOriginal',
-          'OffsetTime',
-        ],
-        translateValues: true,
-      });
+      if (video) {
+        meta = await exifr.parse(file, true); // parse everything for videos
+      } else {
+        meta = await exifr.parse(file, {
+          pick: [
+            'DateTimeOriginal',
+            'CreateDate',
+            'CreationTime',
+            'OffsetTimeOriginal',
+            'OffsetTime',
+          ],
+          translateValues: true,
+        });
+      }
     } catch (err) {
       console.warn('[photos] metadata parse failed for', file.name, err);
     }
@@ -127,7 +133,14 @@ export async function parse(input, onProgress = () => {}) {
 
 function extractTimestamp(meta) {
   if (!meta) return null;
-  const raw = meta.DateTimeOriginal || meta.CreateDate || meta.CreationTime;
+  // Try image EXIF fields first, then QuickTime/MP4 atom names.
+  const raw = meta.DateTimeOriginal
+           || meta.CreateDate
+           || meta.CreationTime
+           || meta.CreationDate       // Apple QuickTime
+           || meta.MediaCreateDate    // MP4/MOV standard
+           || meta.TrackCreateDate    // MP4 track atom
+           || meta['com.apple.quicktime.creationdate'];
   if (!raw) return null;
   if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
   const d = new Date(raw);

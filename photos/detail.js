@@ -78,19 +78,11 @@ export async function renderPhotosDetail(container, activity, opts) {
         </div>
         <div class="pd-share-body">
           <p class="pd-share-hint">
-            Renders your photo tour to a shareable WebM file — plays inline in Twitter/X, iMessage, Discord, WhatsApp, and Slack.
+            Animates the whole workout: dot traces the full route, photos appear when they were taken. Camera starts wide, zooms in mid-workout, then pulls back for a wide finish. Output is a WebM that plays inline in Twitter/X, iMessage, Discord, WhatsApp, and Slack.
           </p>
           <div class="pd-share-row">
-            <label>Speed <span id="pd-share-speed-val">1.0×</span></label>
-            <input type="range" id="pd-share-speed" min="0.5" max="3" step="0.1" value="1" />
-          </div>
-          <div class="pd-share-row">
-            <label>Pause on photos <span id="pd-share-hold-val">3s</span></label>
-            <input type="range" id="pd-share-hold" min="1" max="8" step="1" value="3" />
-          </div>
-          <div class="pd-share-row">
-            <label>Extra pause after videos <span id="pd-share-tail-val">1s</span></label>
-            <input type="range" id="pd-share-tail" min="0" max="3" step="1" value="1" />
+            <label>Video length <span id="pd-share-len-val">25s</span></label>
+            <input type="range" id="pd-share-len" min="10" max="60" step="5" value="25" />
           </div>
           <div class="pd-share-status" id="pd-share-status" hidden>
             <div class="pd-share-progress"><div id="pd-share-progress-fill"></div></div>
@@ -199,12 +191,8 @@ function wireShareModal(container, activity) {
   const closeBtn = container.querySelector('#pd-share-close');
   const cancelBtn = container.querySelector('#pd-share-cancel');
   const goBtn = container.querySelector('#pd-share-go');
-  const speedIn = container.querySelector('#pd-share-speed');
-  const holdIn  = container.querySelector('#pd-share-hold');
-  const tailIn  = container.querySelector('#pd-share-tail');
-  const speedLbl = container.querySelector('#pd-share-speed-val');
-  const holdLbl  = container.querySelector('#pd-share-hold-val');
-  const tailLbl  = container.querySelector('#pd-share-tail-val');
+  const lenIn = container.querySelector('#pd-share-len');
+  const lenLbl = container.querySelector('#pd-share-len-val');
   const statusEl = container.querySelector('#pd-share-status');
   const statusLbl = container.querySelector('#pd-share-status-label');
   const progFill  = container.querySelector('#pd-share-progress-fill');
@@ -222,9 +210,7 @@ function wireShareModal(container, activity) {
   cancelBtn.addEventListener('click', close);
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
-  speedIn.addEventListener('input', () => { speedLbl.textContent = `${(+speedIn.value).toFixed(1)}×`; });
-  holdIn.addEventListener('input',  () => { holdLbl.textContent  = `${holdIn.value}s`; });
-  tailIn.addEventListener('input',  () => { tailLbl.textContent  = `${tailIn.value}s`; });
+  lenIn.addEventListener('input', () => { lenLbl.textContent = `${lenIn.value}s`; });
 
   goBtn.addEventListener('click', async () => {
     goBtn.disabled = true;
@@ -235,9 +221,7 @@ function wireShareModal(container, activity) {
       const blob = await exportTourVideo({
         activity,
         opts: {
-          speedMultiplier: +speedIn.value,
-          photoHoldMs: +holdIn.value * 1000,
-          videoTailMs: +tailIn.value * 1000,
+          totalDurationSec: +lenIn.value,
           onProgress: (pct, label) => {
             progFill.style.width = `${pct}%`;
             if (label) statusLbl.textContent = `${label} ${pct}%`;
@@ -338,14 +322,21 @@ function toggleTour(container, entries) {
 }
 
 function enterCinema(container) {
+  document.body.classList.add('cinema-tour');
   container.classList.add('cinema');
-  // Leaflet needs to re-measure its container after the size change.
-  setTimeout(() => { try { _mapRef?.invalidateSize(); } catch {} }, 240);
+  // Wait for the browser to apply the new layout before telling Leaflet to
+  // re-measure. Single RAF fires before layout; double RAF is after paint.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    try { _mapRef?.invalidateSize(); } catch {}
+  }));
 }
 
 function exitCinema(container) {
+  document.body.classList.remove('cinema-tour');
   container.classList.remove('cinema');
-  setTimeout(() => { try { _mapRef?.invalidateSize(); } catch {} }, 240);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    try { _mapRef?.invalidateSize(); } catch {}
+  }));
 }
 
 function scheduleTourAdvance(container, entries) {

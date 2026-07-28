@@ -425,37 +425,46 @@
     .pd-preview-unmute:hover { background: rgba(0,0,0,0.9); }
 
     /* ── Cinema mode (tour Play) ────────────────────────────────────
-       When #photos-screen-body has .cinema, hide the chrome and let
-       map + preview fill the viewport side-by-side. */
-    #photos-screen-body.cinema .photos-detail-header,
-    #photos-screen-body.cinema .photos-detail-legend,
-    #photos-screen-body.cinema #pd-grid {
-      display: none;
-    }
-    #photos-screen-body.cinema .photos-detail-mapwrap {
+       When body.cinema-tour is set, the whole viewport becomes
+       map | preview. Applied at <body> level so we escape the card's
+       overflow:hidden and the map container gets natural dimensions. */
+    body.cinema-tour { overflow: hidden; }
+    body.cinema-tour #photos-screen .bs-card {
       position: fixed;
       inset: 0;
       z-index: 1500;
+      margin: 0;
+      border-radius: 0;
       background: #000;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
+      overflow: hidden;
     }
-    #photos-screen-body.cinema .photos-detail-map {
+    body.cinema-tour .photos-detail-header,
+    body.cinema-tour .photos-detail-legend,
+    body.cinema-tour #pd-grid { display: none; }
+    body.cinema-tour .photos-screen-inner { padding: 0; max-width: none; }
+    body.cinema-tour .photos-detail-mapwrap {
+      display: flex;
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+    }
+    body.cinema-tour .photos-detail-map {
+      flex: 1 1 50%;
+      width: auto;
       height: 100vh;
       min-height: 0;
+      min-width: 0;
     }
-    #photos-screen-body.cinema .pd-preview {
+    body.cinema-tour .pd-preview {
       position: static;
-      width: 100%;
-      max-height: 100vh;
+      flex: 1 1 50%;
+      width: auto;
       height: 100vh;
+      max-height: 100vh;
       border-radius: 0;
       box-shadow: none;
     }
-    /* Floating exit-cinema pill in top-right of the fullscreen overlay */
-    #photos-screen-body.cinema .photos-detail-mapwrap::before {
-      content: '';
-    }
+    /* Floating control pill visible only in cinema mode */
     .cinema-controls {
       position: fixed;
       top: 12px;
@@ -468,7 +477,7 @@
       border-radius: 999px;
       box-shadow: 0 4px 14px rgba(0,0,0,0.4);
     }
-    #photos-screen-body.cinema .cinema-controls { display: inline-flex; }
+    body.cinema-tour .cinema-controls { display: inline-flex; }
     .cinema-controls .tl-btn {
       background: transparent;
       border: none;
@@ -478,12 +487,11 @@
     .cinema-controls .tl-btn:hover { background: rgba(255,255,255,0.1); }
 
     @media (max-width: 900px) {
-      #photos-screen-body.cinema .photos-detail-mapwrap {
-        grid-template-columns: 1fr;
-        grid-template-rows: 1fr 1fr;
+      body.cinema-tour .photos-detail-mapwrap {
+        flex-direction: column;
       }
-      #photos-screen-body.cinema .photos-detail-map { height: 50vh; }
-      #photos-screen-body.cinema .pd-preview { height: 50vh; }
+      body.cinema-tour .photos-detail-map { flex: 1 1 50vh; height: 50vh; }
+      body.cinema-tour .pd-preview { flex: 1 1 50vh; height: 50vh; }
     }
     .photos-detail-legend { padding: 8px var(--sp-6); font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
     .pd-legend-hint { margin-left: auto; color: var(--text-mid); }

@@ -1,40 +1,38 @@
 /**
  * photos/export.js
- * Build a per-workout tour video from the same photo state the on-screen tour
- * uses. Output: WebM via canvas.captureStream + MediaRecorder.
+ * Render a workout to a shareable WebM video.
  *
- * Frame composition lives in composite.js. This module owns the timeline,
- * the frame loop, and MediaRecorder lifecycle.
+ * Timeline model: the video animates the full workout, start to finish,
+ * compressed into `totalDurationSec`. The moving position dot traces the
+ * entire GPX route (including sections between photos). Photos and videos
+ * appear in the lower panel timed to when they were actually taken during
+ * the workout.
  *
- * Rough timeline for each entry:
- *   [transition (interp map dot)] [hold (still photo) OR play (video)]
- * Videos ignore the photo hold and use their own duration (capped).
+ * Camera: starts wide (fits the whole route in view), tightens in
+ * mid-workout for a follow-cam feel, then zooms back out to a wide finish.
+ * We pre-load basemap tiles at the tighter zoom so tiles are available at
+ * every step (the wider zoom is a straight downscale of the same tiles —
+ * looks fine for a short social clip).
  */
 
-import { drawFrame, makeProjection, defaultSize } from './composite.js';
+import { drawFrame, makeCamera, loadBasemapTiles, computeBBox, bestZoomForBBox, defaultSize } from './composite.js';
 import { ensurePhotoURL } from './heic.js';
 
 const FPS = 30;
-const MIN_TRANSITION_MS = 400;
-const VIDEO_MAX_MS = 20000;
 
 /**
  * @param {object} args
- * @param {Activity} args.activity  Must have route_points + photos populated
+ * @param {Activity} args.activity        Must have route_points + photos
  * @param {{
- *   speedMultiplier?: number,   // 0.5..3, scales transition speed (default 1)
- *   photoHoldMs?: number,       // default 3000
- *   videoTailMs?: number,       // default 1000
- *   size?: {w:number,h:number}, // default 720x1280
+ *   totalDurationSec?: number,   // default 25s — full length of exported clip
+ *   size?: {w:number,h:number},
  *   onProgress?: (pct:number, label?:string) => void,
  * }} args.opts
- * @returns {Promise<Blob>}  A WebM Blob of the rendered tour
+ * @returns {Promise<Blob>}
  */
 export async function exportTourVideo({ activity, opts = {} }) {
   const size = opts.size || defaultSize();
-  const speed = opts.speedMultiplier ?? 1;
-  const photoHoldMs = opts.photoHoldMs ?? 3000;
-  const videoTailMs = opts.videoTailMs ?? 1000;
+  const totalDurationMs = (opts.totalDurationSec ?? 25) * 1000;
   const onProgress = opts.onProgress || (() => {});
 
   onProgress(0, 'Preparing…');
@@ -43,85 +41,94 @@ export async function exportTourVideo({ activity, opts = {} }) {
   if (!activity.route_points && typeof activity._gpxLoader === 'function') {
     try { activity.route_points = await activity._gpxLoader(); } catch {}
   }
-  const route = (activity.route_points || [])
-    .filter(p => p.lat !== null && p.lng !== null)
-    .map(p => [p.lat, p.lng]);
-  const photos = (activity.photos || []).slice().sort((a, b) => a.timestamp - b.timestamp);
-  if (photos.length === 0) throw new Error('No photos to export');
+  const routePts = (activity.route_points || []).filter(p => p.lat !== null && p.lng !== null);
+  if (routePts.length === 0) throw new Error('Route has no valid points');
+  const route = routePts.map(p => [p.lat, p.lng]);
 
-  // Preload media (images + video elements). Videos we DON'T fully preload —
-  // we just create the element; the draw loop pulls frames from it when active.
-  onProgress(5, 'Loading media…');
-  const items = [];
+  // Photos sorted chronologically
+  const photos = (activity.photos || []).slice().sort((a, b) => a.timestamp - b.timestamp);
+
+  // Determine the workout's time span. Prefer GPX timestamps (most accurate);
+  // fall back to activity.date + duration_s.
+  const timedPts = routePts.filter(p => p.time instanceof Date);
+  let startMs, endMs;
+  if (timedPts.length >= 2) {
+    startMs = timedPts[0].time.getTime();
+    endMs   = timedPts[timedPts.length - 1].time.getTime();
+  } else if (activity.date && activity.duration_s > 0) {
+    startMs = activity.date.getTime();
+    endMs   = startMs + activity.duration_s * 1000;
+  } else {
+    // Last resort: use photo range or an artificial span
+    if (photos.length) {
+      startMs = photos[0].timestamp.getTime();
+      endMs   = photos[photos.length - 1].timestamp.getTime() + 1000;
+    } else {
+      startMs = 0; endMs = 1000;
+    }
+  }
+  const workoutMs = Math.max(1, endMs - startMs);
+
+  // Pre-load media
+  onProgress(5, 'Loading photos…');
+  const preloaded = [];
   for (let i = 0; i < photos.length; i++) {
     const p = photos[i];
     const src = p._source || p;
-    const url = p.isVideo ? src.url : await ensurePhotoURL(src);
-    if (!url) continue;
-    let element;
-    if (p.isVideo) {
-      element = document.createElement('video');
-      element.src = url;
-      element.muted = true; // for MVP we don't composite audio
-      element.playsInline = true;
-      element.preload = 'auto';
-      await new Promise(resolve => {
-        if (element.readyState >= 1) resolve();
-        else element.addEventListener('loadedmetadata', resolve, { once: true });
-        element.addEventListener('error', resolve, { once: true });
-      });
-    } else {
-      element = await loadImage(url);
+    try {
+      const url = p.isVideo ? src.url : await ensurePhotoURL(src);
+      if (!url) continue;
+      let element;
+      if (p.isVideo) {
+        element = document.createElement('video');
+        element.src = url;
+        element.muted = true;
+        element.playsInline = true;
+        element.preload = 'auto';
+        await new Promise(resolve => {
+          if (element.readyState >= 1) return resolve();
+          element.addEventListener('loadedmetadata', resolve, { once: true });
+          element.addEventListener('error', resolve, { once: true });
+        });
+      } else {
+        element = await loadImage(url);
+      }
+      preloaded.push({ photo: p, element, isVideo: !!p.isVideo });
+    } catch (err) {
+      console.warn('[export] failed to load', p.name, err);
     }
-    items.push({ photo: p, element, isVideo: !!p.isVideo });
-    onProgress(5 + Math.round((i / photos.length) * 20), 'Loading media…');
+    onProgress(5 + Math.round((i + 1) / Math.max(1, photos.length) * 15), 'Loading photos…');
   }
-  if (items.length === 0) throw new Error('No renderable photos');
 
-  // Build a projection over the entire route bbox.
-  const project = makeProjection(route.length ? route : items.map(it => [it.photo.lat, it.photo.lng]), {
-    x: 0, y: 0, w: size.w, h: size.h / 2,
+  // Compute route bounding box + camera zoom levels
+  const mapViewport = { x: 24, y: 24, w: size.w - 48, h: Math.round(size.h * 0.55) };
+  const bbox = computeBBox(route);
+  const wideZoom = bestZoomForBBox(bbox, mapViewport, 0.85);
+  const closeZoom = Math.min(wideZoom + 2, 17);
+
+  // Pre-load basemap tiles at the closer zoom (we downscale for wide shots).
+  onProgress(22, 'Loading map tiles…');
+  const tileSet = await loadBasemapTiles(bbox, closeZoom, (frac) => {
+    onProgress(22 + Math.round(frac * 18), 'Loading map tiles…');
   });
+  onProgress(40, 'Recording…');
 
-  // Build a route-fraction index for the current-dot position: for each item,
-  // find the closest route point index; that's the "progress" endpoint.
-  const routeFractions = items.map(it => nearestRouteFraction(route, [it.photo.lat, it.photo.lng]));
-
-  // Build timeline
-  onProgress(25, 'Planning timeline…');
-  const timeline = [];
-  let cursor = 0;
-  for (let i = 0; i < items.length; i++) {
-    const it = items[i];
-    const transitionMs = Math.max(MIN_TRANSITION_MS, Math.round(800 / speed));
-    if (i > 0) {
-      timeline.push({
-        kind: 'transition',
-        from: i - 1, to: i,
-        fromFrac: routeFractions[i - 1],
-        toFrac: routeFractions[i],
-        start: cursor,
-        end: cursor + transitionMs,
-      });
-      cursor += transitionMs;
+  // Route fractions for interpolation:
+  //   at each ROUTE POINT, what fraction of the workout has elapsed?
+  // If we have per-point timestamps we use those (correct spacing); otherwise
+  // uniform spacing by index.
+  const routeFrac = new Array(routePts.length);
+  if (timedPts.length === routePts.length) {
+    for (let i = 0; i < routePts.length; i++) {
+      routeFrac[i] = (routePts[i].time.getTime() - startMs) / workoutMs;
     }
-    const holdMs = it.isVideo
-      ? Math.min(VIDEO_MAX_MS, Math.round((it.element.duration || 3) * 1000)) + videoTailMs
-      : photoHoldMs;
-    timeline.push({
-      kind: 'hold',
-      idx: i,
-      atFrac: routeFractions[i],
-      start: cursor,
-      end: cursor + holdMs,
-      isVideo: it.isVideo,
-    });
-    cursor += holdMs;
+  } else {
+    for (let i = 0; i < routePts.length; i++) {
+      routeFrac[i] = i / Math.max(1, routePts.length - 1);
+    }
   }
-  const totalMs = cursor;
 
-  // Set up rendering canvas + MediaRecorder
-  onProgress(30, 'Recording…');
+  // Set up recording canvas + MediaRecorder
   const canvas = document.createElement('canvas');
   canvas.width = size.w;
   canvas.height = size.h;
@@ -130,64 +137,72 @@ export async function exportTourVideo({ activity, opts = {} }) {
   const stream = canvas.captureStream(FPS);
   const mimeType = pickMimeType();
   const chunks = [];
-  const recorder = new MediaRecorder(stream, { mimeType });
+  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
   recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
   const recordingDone = new Promise(resolve => { recorder.onstop = resolve; });
   recorder.start(1000);
 
   // Playback loop
   const startedAt = performance.now();
-  const activeVideos = new Set();
-  await new Promise((resolve) => {
+  const currentlyPlayingVideos = new Set();
+  await new Promise(resolve => {
     const tick = () => {
       const now = performance.now();
       const t = now - startedAt;
-      if (t >= totalMs) {
-        // Ensure any playing video is paused
-        activeVideos.forEach(v => { try { v.pause(); } catch {} });
+      if (t >= totalDurationMs) {
+        currentlyPlayingVideos.forEach(v => { try { v.pause(); } catch {} });
         return resolve();
       }
+      const frac = t / totalDurationMs;
+      const workoutT = startMs + frac * workoutMs;
 
-      const seg = timeline.find(s => t >= s.start && t < s.end) || timeline[timeline.length - 1];
+      // Camera zoom: wide → close → wide (sinusoidal ease)
+      const zoomEase = Math.sin(frac * Math.PI); // 0 at ends, 1 at middle
+      const zoomLevel = Math.round(wideZoom + (closeZoom - wideZoom) * zoomEase);
 
-      let currentItem, dotFrac;
-      if (seg.kind === 'transition') {
-        const localT = (t - seg.start) / (seg.end - seg.start);
-        const eased = easeInOutCubic(clamp01(localT));
-        dotFrac = seg.fromFrac + (seg.toFrac - seg.fromFrac) * eased;
-        currentItem = items[seg.from];
-      } else {
-        dotFrac = seg.atFrac;
-        currentItem = items[seg.idx];
-        // Start video playback if this is its first tick
-        if (seg.isVideo && currentItem.element.paused && !activeVideos.has(currentItem.element)) {
-          try { currentItem.element.currentTime = 0; currentItem.element.play(); } catch {}
-          activeVideos.add(currentItem.element);
-        }
+      // Position along route at time workoutT
+      const dotLatLng = positionAtTime(route, routeFrac, frac);
+      const camera = makeCamera(dotLatLng, zoomLevel, mapViewport);
+
+      // Which photo/video is "active" right now? The nearest photo whose
+      // timestamp is within a display window centered on workoutT. Window
+      // = totalDurationMs equivalent in workout time / max(photos, 3).
+      const activeEntry = pickActivePhoto(preloaded, workoutT, workoutMs, totalDurationMs);
+
+      // If active is a video, start playback (once)
+      if (activeEntry?.isVideo && activeEntry.element.paused && !currentlyPlayingVideos.has(activeEntry.element)) {
+        try {
+          activeEntry.element.currentTime = 0;
+          activeEntry.element.play();
+          currentlyPlayingVideos.add(activeEntry.element);
+        } catch {}
+      }
+      // Pause any videos that are no longer active
+      for (const v of currentlyPlayingVideos) {
+        if (activeEntry?.element !== v) { try { v.pause(); } catch {} currentlyPlayingVideos.delete(v); }
       }
 
-      const dotLatLng = interpAlongRoute(route, dotFrac);
-      const caption = currentItem?.photo?.timestamp
-        ? currentItem.photo.timestamp.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-        : '';
+      const captionParts = [];
+      if (activeEntry?.photo?.timestamp) {
+        captionParts.push(activeEntry.photo.timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
+      } else {
+        captionParts.push(new Date(workoutT).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
+      }
 
       drawFrame(ctx, {
         size,
+        camera,
+        tileSet,
         route,
-        project,
-        progress: dotFrac,
+        progress: frac,
         dotLatLng,
-        media: currentItem?.element || null,
-        caption,
+        media: activeEntry?.element || null,
+        caption: captionParts.join(' · '),
         title: `${activity.type} · ${formatShortDate(activity.date)}`,
-        themeBg: '#0f0f13',
-        themeSurf: '#1a1a22',
-        themeAccent: '#4A90D9',
+        themeAccent: '#dc2626',
       });
 
-      // Progress callback (throttled)
-      const pct = 30 + Math.round((t / totalMs) * 65);
-      onProgress(pct, 'Recording…');
+      onProgress(40 + Math.round(frac * 55), 'Recording…');
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -195,25 +210,19 @@ export async function exportTourVideo({ activity, opts = {} }) {
 
   recorder.stop();
   await recordingDone;
-  stream.getTracks().forEach(t => t.stop());
+  stream.getTracks().forEach(track => track.stop());
   onProgress(98, 'Finalizing…');
-
-  // Give the recorder a beat to flush the final chunk
-  await new Promise(r => setTimeout(r, 100));
+  await new Promise(r => setTimeout(r, 150));
   const blob = new Blob(chunks, { type: mimeType });
   onProgress(100, 'Done');
   return blob;
 }
 
-/** Trigger a browser download for a Blob. */
 export function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
@@ -224,7 +233,7 @@ function pickMimeType() {
     'video/webm;codecs=vp9',
     'video/webm;codecs=vp8',
     'video/webm',
-    'video/mp4', // Safari 14.1+
+    'video/mp4',
   ];
   for (const t of candidates) {
     if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) return t;
@@ -237,51 +246,61 @@ function loadImage(url) {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('image load failed: ' + url));
+    img.onerror = () => reject(new Error('image load failed'));
     img.src = url;
   });
 }
 
 /**
- * Given an [lat,lng] point, find the nearest index in the route and return
- * that index as a 0..1 fraction of route length.
+ * Given a fraction (0..1) of total video time, find the corresponding
+ * position along the route by interpolating between route points whose
+ * per-point workout-fraction brackets `frac`.
  */
-function nearestRouteFraction(route, latLng) {
-  if (route.length === 0) return 0;
-  if (route.length === 1) return 0;
-  let bestIdx = 0, bestDist = Infinity;
-  for (let i = 0; i < route.length; i++) {
-    const d = haversineSq(route[i], latLng);
-    if (d < bestDist) { bestDist = d; bestIdx = i; }
-  }
-  return bestIdx / (route.length - 1);
-}
-
-/** Given a fraction 0..1 along the route, return the interpolated [lat,lng]. */
-function interpAlongRoute(route, frac) {
+function positionAtTime(route, routeFrac, frac) {
   if (route.length === 0) return null;
   if (route.length === 1) return route[0];
-  const t = clamp01(frac) * (route.length - 1);
-  const lo = Math.floor(t);
-  const hi = Math.min(route.length - 1, lo + 1);
-  const f = t - lo;
+  // Binary search for the last routeFrac ≤ frac
+  let lo = 0, hi = route.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (routeFrac[mid] <= frac) lo = mid; else hi = mid - 1;
+  }
+  const i = lo;
+  const j = Math.min(route.length - 1, i + 1);
+  const span = routeFrac[j] - routeFrac[i];
+  const local = span > 0 ? (frac - routeFrac[i]) / span : 0;
   return [
-    route[lo][0] + (route[hi][0] - route[lo][0]) * f,
-    route[lo][1] + (route[hi][1] - route[lo][1]) * f,
+    route[i][0] + (route[j][0] - route[i][0]) * local,
+    route[i][1] + (route[j][1] - route[i][1]) * local,
   ];
 }
 
-function haversineSq(a, b) {
-  const dLat = a[0] - b[0];
-  const dLng = a[1] - b[1];
-  return dLat * dLat + dLng * dLng;
+/**
+ * Pick which photo/video should be displayed at the given workout timestamp.
+ * A photo is "active" during a window centered on its timestamp; the window
+ * width scales with how many photos there are so they get roughly equal
+ * screen time.
+ */
+function pickActivePhoto(preloaded, workoutT, workoutMs, totalMs) {
+  if (!preloaded.length) return null;
+  // For videos, the window is at least the video's duration (so it plays
+  // through). For photos, the window is a share of the workout, min 2s of
+  // wall-clock (converted to workout-time).
+  const wallToWorkout = workoutMs / totalMs;
+  let best = null, bestDist = Infinity;
+  for (const entry of preloaded) {
+    if (!entry.photo?.timestamp) continue;
+    const ts = entry.photo.timestamp.getTime();
+    const dist = Math.abs(ts - workoutT);
+    const windowHalf = entry.isVideo
+      ? Math.max(1000 * wallToWorkout, (entry.element.duration || 3) * 1000 * wallToWorkout) / 2
+      : (2000 * wallToWorkout);
+    if (dist <= windowHalf && dist < bestDist) {
+      best = entry; bestDist = dist;
+    }
+  }
+  return best;
 }
-
-function easeInOutCubic(t) {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
-function clamp01(n) { return Math.max(0, Math.min(1, n)); }
 
 function formatShortDate(d) {
   if (!d) return '';
