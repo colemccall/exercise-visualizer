@@ -30,10 +30,32 @@ const ESRI_OPTS = { maxZoom: 16, attribution: 'Tiles &copy; Esri &mdash; Esri, D
 function tileUrl(_dark) { return ESRI_GRAY; }
 function tileOpts(_dark) { return ESRI_OPTS; }
 
+let _heatStyle = 'type'; // 'type' | 'frequency'
+
+export function getHeatStyle() { return _heatStyle; }
+
+export function setHeatStyle(style) {
+  _heatStyle = (style === 'frequency') ? 'frequency' : 'type';
+}
+
 export function routeStyle(dark) {
+  if (_heatStyle === 'frequency') {
+    // Single-color low-opacity stroke; stacked routes darken overlap regions.
+    return dark
+      ? { weight: 3, opacity: 0.12 }
+      : { weight: 3, opacity: 0.15 };
+  }
   return dark
     ? { weight: 1.5, opacity: 0.55 }  // brighter on dark
     : { weight: 2,   opacity: 0.65 }; // stronger on light
+}
+
+// Resolve stroke color for the current heat style.
+export function styleColor(activity, dark) {
+  if (_heatStyle === 'frequency') {
+    return dark ? '#ffffff' : '#1e3a5f';
+  }
+  return TYPE_COLORS[activity.type] || TYPE_COLORS.Other;
 }
 
 
@@ -49,8 +71,7 @@ export function setHeatmapTheme(dark) {
   _renderedPolylines.forEach((poly, i) => {
     const act = _renderedActivities[i];
     if (!poly || !act) return;
-    const color = TYPE_COLORS[act.type] || TYPE_COLORS.Other;
-    poly.setStyle({ color, weight, opacity });
+    poly.setStyle({ color: styleColor(act, dark), weight, opacity });
   });
 }
 
@@ -101,10 +122,11 @@ export async function renderHeatmap(activities, map) {
     for (const activity of batch) {
       const pts = activity.route_points;
       if (!pts || pts.length < 2) continue;
-      const color   = TYPE_COLORS[activity.type] || TYPE_COLORS.Other;
+      const dark    = isDark();
+      const color   = styleColor(activity, dark);
       const latLngs = pts.filter(p => p.lat !== null && p.lng !== null).map(p => [p.lat, p.lng]);
       if (latLngs.length < 2) continue;
-      const { weight, opacity } = routeStyle(isDark());
+      const { weight, opacity } = routeStyle(dark);
       const polyline = L.polyline(latLngs, { color, weight, opacity });
       polyline.addTo(_routeLayerGroup);
       allLatLngs.push(...latLngs);

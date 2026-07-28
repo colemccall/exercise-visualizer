@@ -255,6 +255,139 @@
     #dashboard-screen { display: none; }
     #dashboard-screen.visible { display: block; }
 
+    /* -- Photos screen -- */
+    #photos-screen { display: none; }
+    #photos-screen.visible { display: block; }
+    .photos-screen-inner { max-width: 1200px; margin: 0 auto; padding: var(--sp-4) var(--sp-6); }
+    .photos-header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+    .photos-title { font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--text); }
+    .photos-stats { font-size: 13px; color: var(--text-muted); display: flex; gap: 6px; align-items: center; }
+    .photos-stats strong { color: var(--text); }
+    .photos-unmatched { color: var(--warn); }
+    .photos-buffer-row { margin-left: auto; display: inline-flex; align-items: center; gap: var(--sp-2); font-size: 12px; color: var(--text-muted); }
+    .photos-buffer-row input[type=range] { width: 160px; }
+    .photos-empty { padding: var(--sp-6); text-align: center; color: var(--text-muted); font-size: 14px; }
+    .photos-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-3); }
+    .photos-row { display: flex; gap: var(--sp-3); padding: var(--sp-3); cursor: pointer; align-items: center; transition: transform 120ms ease; }
+    .photos-row:hover { transform: translateY(-1px); }
+    .photos-row-info { flex: 1; min-width: 0; }
+    .photos-row-date { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .photos-row-name { font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--text); margin: 2px 0; }
+    .photos-row-meta { font-size: 12px; color: var(--text-mid); }
+    .photos-row-thumbs { display: flex; gap: 4px; flex-shrink: 0; }
+    .photos-thumb-wrap { position: relative; width: 44px; height: 44px; }
+    .photos-thumb { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; background: var(--surface-2); border: 1px solid var(--border); display: block; }
+    .photos-thumb-play {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 14px; text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+      pointer-events: none;
+    }
+
+    /* Photo markers on Leaflet */
+    .photo-marker-wrap { background: transparent !important; border: none !important; }
+    .photo-marker {
+      position: relative;
+      width: 44px; height: 44px; border-radius: 50%;
+      border: 2px solid #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+      background-size: cover; background-position: center;
+      background-color: #888;
+    }
+    .photo-marker.interpolated { border-style: dashed; border-color: rgba(255,255,255,0.85); }
+    .photo-marker-play {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 14px;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+      pointer-events: none;
+    }
+
+    /* Photo detail view layout */
+    .photos-detail-header {
+      display: flex; align-items: center; gap: var(--sp-4);
+      padding: var(--sp-3) var(--sp-6);
+      border-bottom: 1px solid var(--border);
+    }
+    .photos-detail-title { flex: 1; min-width: 0; }
+    .photos-detail-name { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: var(--text); }
+    .photos-detail-meta { font-size: 12px; color: var(--text-muted); }
+    .photos-detail-tour { display: inline-flex; gap: 6px; }
+    .photos-detail-map { width: 100%; height: 60vh; min-height: 400px; }
+    .photos-detail-legend { padding: 8px var(--sp-6); font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+    .pd-legend-hint { margin-left: auto; color: var(--text-mid); }
+    .pd-legend-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--text-mid); vertical-align: middle; margin-right: 4px; }
+    .pd-legend-dot.dashed { border-style: dashed; }
+    .pd-caption-meta { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+    /* Full-photo grid below map */
+    .pd-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: var(--sp-2);
+      padding: var(--sp-4) var(--sp-6);
+    }
+    .pd-grid-empty { grid-column: 1 / -1; padding: var(--sp-6); text-align: center; color: var(--text-muted); font-size: 13px; }
+    .pd-tile {
+      appearance: none;
+      background: transparent;
+      border: 2px solid transparent;
+      border-radius: var(--radius-md);
+      padding: 0;
+      cursor: pointer;
+      display: flex; flex-direction: column;
+      transition: transform 120ms ease, border-color 120ms ease;
+      overflow: hidden;
+    }
+    .pd-tile:hover { transform: translateY(-2px); }
+    .pd-tile.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+    .pd-tile-thumb {
+      position: relative;
+      width: 100%; aspect-ratio: 1;
+      background-color: var(--surface-2);
+      background-size: cover; background-position: center;
+      border-radius: var(--radius-md);
+    }
+    .pd-tile-play {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-size: 28px; text-shadow: 0 2px 6px rgba(0,0,0,0.7);
+      pointer-events: none;
+    }
+    .pd-tile-badge {
+      position: absolute; top: 6px; right: 6px;
+      background: rgba(0,0,0,0.65); color: #fff;
+      font-size: 12px; font-weight: 700;
+      width: 22px; height: 22px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .pd-tile-fallback {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted); font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    }
+    .pd-tile-caption {
+      font-size: 11px;
+      color: var(--text-mid);
+      padding: 4px 2px;
+      text-align: center;
+    }
+
+    /* Lightbox */
+    .pd-lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 2000; display: flex; align-items: center; justify-content: center; padding: var(--sp-6); }
+    .pd-lightbox[hidden] { display: none; }
+    .pd-lightbox-inner { position: relative; max-width: 100%; max-height: 100%; display: flex; flex-direction: column; align-items: center; }
+    .pd-lightbox-media { display: flex; align-items: center; justify-content: center; }
+    .pd-lightbox-img, .pd-lightbox-video { max-width: 90vw; max-height: 82vh; border-radius: var(--radius-md); box-shadow: 0 8px 30px rgba(0,0,0,0.6); }
+    .pd-lightbox-video { background: #000; }
+    .pd-lightbox-fallback { color: #ccc; padding: var(--sp-6); font-size: 14px; }
+    .pd-lightbox-caption { color: #eee; margin-top: var(--sp-3); font-size: 14px; }
+    .pd-lightbox-close { position: absolute; top: -12px; right: -12px; background: #fff; color: #000; border: none; border-radius: 50%; width: 32px; height: 32px; font-size: 20px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+
+    /* Photos nav button in dashboard header */
+    #btn-photos-view { display: none; }
+    #btn-photos-view.available { display: inline-flex; }
+
     /* Header controls row */
     .header-controls {
       display: flex;
@@ -340,8 +473,38 @@
       border-top: 1px solid var(--border);
       border-bottom: 1px solid var(--border);
     }
-    #heatmap-container { flex: 1; min-width: 0; overflow: hidden; }
+    #heatmap-container { flex: 1; min-width: 0; overflow: hidden; position: relative; }
     #heatmap { width: 100%; height: 100%; }
+
+    .heatmap-style-toggle {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 500;
+      display: inline-flex;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+      overflow: hidden;
+    }
+    .hm-style-btn {
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 6px 10px;
+      border: none;
+      background: transparent;
+      color: var(--text-mid);
+      cursor: pointer;
+    }
+    .hm-style-btn:hover { color: var(--text); }
+    .hm-style-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
 
     #explore-panel {
       width: 280px;
@@ -987,6 +1150,28 @@
 
       </div><!-- /.bs-upload-zones -->
 
+      <!-- Photos + videos (optional) -->
+      <div class="bs-display-md" style="margin-top:var(--sp-6); margin-bottom:var(--sp-3); color:var(--text); font-size:16px;">
+        Add Photos &amp; Videos <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(optional — pairs media with the workout that was happening)</span>
+      </div>
+      <div class="bs-upload-zones" id="photo-zones">
+
+        <div class="bs-upload-zone" id="zone-photos" data-source="photos">
+          <input type="file" id="file-photos" accept="image/*,video/*,.heic,.heif,.mov,.mp4,.m4v" style="display:none" multiple aria-label="Choose photo or video files" />
+          <div class="bs-upload-icon">&#128247;</div>
+          <div class="bs-upload-name">Photos &amp; Videos</div>
+          <label for="file-photos" class="upload-choose-btn" id="sub-photos">Choose files</label>
+          <div id="filelist-photos" class="staged-file-list"></div>
+          <details class="how-to-export" style="margin-top:var(--sp-3); text-align:left;">
+            <summary>Tips</summary>
+            <div class="export-body">
+              <p>Drag JPG, HEIC, MP4, or MOV files straight from your photo folder. Timestamp + GPS metadata is read locally.</p>
+            </div>
+          </details>
+        </div>
+
+      </div><!-- /#photo-zones -->
+
       <!-- Go button -->
       <div class="go-row">
         <div class="go-file-summary" id="go-file-count"></div>
@@ -1026,6 +1211,7 @@
         <button id="btn-metric" class="active">km</button>
         <button id="btn-imperial">mi</button>
       </div>
+      <button class="bs-btn bs-btn-secondary" id="btn-photos-view" style="font-size:12px; padding:6px 14px;">&#128247; Photos <span id="photos-count-badge" style="opacity:0.7"></span></button>
       <button class="tl-btn" id="btn-theme-toggle" style="margin-left:auto;">🌙 Dark</button>
     </div>
 
@@ -1044,6 +1230,10 @@
     <div id="heatmap-explore-wrapper">
       <div id="heatmap-container">
         <div id="heatmap"></div>
+        <div class="heatmap-style-toggle" role="group" aria-label="Route color style">
+          <button type="button" class="hm-style-btn active" data-style="type">By type</button>
+          <button type="button" class="hm-style-btn" data-style="frequency">Frequency</button>
+        </div>
       </div>
 
       <div id="explore-panel">
@@ -1176,6 +1366,24 @@
 
   </div><!-- /.bs-card -->
 </div><!-- /#dashboard-screen -->
+
+
+<!-- ================================================================
+     PHOTOS SCREEN
+================================================================ -->
+<div id="photos-screen">
+  <div class="bs-card" style="margin-bottom:var(--sp-4);">
+    <div class="header-controls">
+      <span class="dash-title">&#128247; Photo Tour</span>
+      <button class="bs-btn bs-btn-secondary" id="btn-photos-back" style="font-size:12px; padding:6px 14px;">
+        &larr; Back to dashboard
+      </button>
+    </div>
+    <div id="photos-screen-body" class="photos-screen-inner">
+      <!-- populated by JS -->
+    </div>
+  </div>
+</div><!-- /#photos-screen -->
 
 
 <!-- ================================================================

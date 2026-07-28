@@ -24,6 +24,10 @@ window.d3 = _d3;
 // ── Parser imports ────────────────────────────────────────────────────────────
 import { parse as parseStrava }  from './parsers/strava.js';
 import { parse as parseApple }   from './parsers/apple.js';
+import { parse as parsePhotos } from './parsers/photos.js';
+import { matchPhotosToActivities } from './photos/matcher.js';
+import { renderPhotosList } from './photos/list.js';
+import { renderPhotosDetail } from './photos/detail.js';
 
 // ── Chart imports ─────────────────────────────────────────────────────────────
 import { renderDistanceChart }  from './charts/distance.js';
@@ -33,7 +37,7 @@ import { renderRecords }        from './charts/records.js';
 import { renderElevationChart, renderHRLineChart } from './charts/elevation.js';
 
 // ── Map imports ───────────────────────────────────────────────────────────────
-import { initHeatmap, renderHeatmap, setHeatmapTheme, routeStyle, _renderedPolylines, _renderedActivities, TYPE_COLORS } from './map/heatmap.js';
+import { initHeatmap, renderHeatmap, setHeatmapTheme, routeStyle, styleColor, setHeatStyle, getHeatStyle, _renderedPolylines, _renderedActivities, TYPE_COLORS } from './map/heatmap.js';
 import { renderRoute }                from './map/route.js';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -42,6 +46,15 @@ import { renderRoute }                from './map/route.js';
 
 /** @type {Activity[]} All loaded activities (across all sources) */
 let allActivities = [];
+
+/** @type {object[]} All parsed photo objects (from parsers/photos.js) */
+let allPhotos = [];
+
+/** Photo-to-workout match window, in minutes */
+let photoBufferMinutes = 5;
+
+/** Latest match summary from matchPhotosToActivities */
+let photoMatchSummary = { matched: 0, unmatched: 0, activitiesWithPhotos: [] };
 
 /** @type {'metric'|'imperial'} */
 let units = localStorage.getItem('fitness-units') || 'metric';
@@ -69,8 +82,12 @@ let detailRouteMap = null;
 const SOURCES = ['strava', 'apple'];
 const PARSERS = { strava: parseStrava, apple: parseApple };
 
+// Photo "sources" are handled separately from fitness sources so they don't
+// pollute activity dedup logic.
+const PHOTO_SOURCES = ['photos'];
+
 /** Staged (not yet parsed) files per source */
-const stagedFiles = { strava: [], apple: [], garmin: [] };
+const stagedFiles = { strava: [], apple: [], garmin: [], photos: [] };
 
 function setupUploadZone(source) {
   const zone  = document.getElementById(`zone-${source}`);
@@ -119,13 +136,18 @@ function updateZoneUI(source) {
     }
   } else {
     zone.classList.remove('staged', 'loaded');
-    sub.textContent = source === 'strava' ? 'Choose ZIP file' : 'Choose file';
+    const defaults = {
+      strava: 'Choose ZIP file',
+      photos: 'Choose files',
+    };
+    sub.textContent = defaults[source] || 'Choose file';
     if (fileList) fileList.innerHTML = '';
   }
 }
 
 function updateGoButton() {
-  const total = SOURCES.reduce((n, s) => n + stagedFiles[s].length, 0);
+  const all = SOURCES.concat(PHOTO_SOURCES);
+  const total = all.reduce((n, s) => n + stagedFiles[s].length, 0);
   const btn   = document.getElementById('btn-go');
   const count = document.getElementById('go-file-count');
   if (!btn) return;
@@ -133,7 +155,7 @@ function updateGoButton() {
   if (total > 0) {
     btn.disabled = false;
     btn.classList.add('ready');
-    const srcNames = SOURCES.filter(s => stagedFiles[s].length > 0)
+    const srcNames = all.filter(s => stagedFiles[s].length > 0)
       .map(s => `${stagedFiles[s].length} ${s}`).join(', ');
     if (count) count.textContent = srcNames;
   } else {
@@ -186,16 +208,49 @@ async function parseAllStaged() {
     document.getElementById(`sub-${source}`).textContent = `${newActivities.length} loaded`;
   }
 
-  showProgress(95, 'Checking for duplicates…');
+  showProgress(93, 'Checking for duplicates…');
   flagDuplicates(allActivities);
+
+  // ── Photos & videos (optional) ─────────────────────────────────────────────
+  const photoFiles = stagedFiles.photos || [];
+
+  if (photoFiles.length > 0) {
+    try {
+      showProgress(94, `Reading ${photoFiles.length} files…`);
+      const newPhotos = await parsePhotos(photoFiles, (pct, label) => {
+        showProgress(94 + Math.round(pct / 100 * 5), label);
+      });
+      document.getElementById('zone-photos')?.classList.replace('staged', 'loaded');
+      const sub = document.getElementById('sub-photos');
+      if (sub) sub.textContent = `${newPhotos.length} loaded`;
+
+      allPhotos = allPhotos.concat(newPhotos);
+
+      showProgress(99, 'Matching photos to workouts…');
+      photoMatchSummary = await matchPhotosToActivities(allPhotos, allActivities, {
+        bufferMinutes: photoBufferMinutes,
+      });
+    } catch (err) {
+      console.error('Photo parse failed:', err);
+      errors.push(`photos: ${err.message}`);
+    }
+  } else if (allPhotos.length > 0) {
+    // Re-run matching in case activities changed
+    photoMatchSummary = await matchPhotosToActivities(allPhotos, allActivities, {
+      bufferMinutes: photoBufferMinutes,
+    });
+  }
 
   showProgress(100, 'Done!');
   setTimeout(hideProgress, 600);
 
+  const msgs = [`Loaded ${totalNew.toLocaleString()} activities`];
+  if (allPhotos.length > 0) msgs.push(`${photoMatchSummary.matched} photos matched`);
   if (errors.length) showToast(`Errors: ${errors.join('; ')}`);
-  else showToast(`Loaded ${totalNew.toLocaleString()} activities`);
+  else showToast(msgs.join(' · '));
 
   showDashboard();
+  updatePhotosNav();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -374,6 +429,7 @@ function showDashboard() {
   document.getElementById('upload-screen').style.display = 'none';
   const dash = document.getElementById('dashboard-screen');
   dash.classList.add('visible');
+  document.getElementById('photos-screen')?.classList.remove('visible');
 
   // Init map immediately while container is visible so invalidateSize works
   if (!heatmapInstance) {
@@ -386,6 +442,51 @@ function showDashboard() {
   setTimeout(() => {
     heatmapInstance.invalidateSize();
   }, 150);
+}
+
+async function renderCurrentPhotosList() {
+  const body = document.getElementById('photos-screen-body');
+  renderPhotosList(body, photoMatchSummary.activitiesWithPhotos, {
+    bufferMinutes: photoBufferMinutes,
+    totalPhotos: allPhotos.length,
+    unmatched: photoMatchSummary.unmatched,
+    onBufferChange: async (n) => {
+      photoBufferMinutes = n;
+      photoMatchSummary = await matchPhotosToActivities(allPhotos, allActivities, {
+        bufferMinutes: n,
+      });
+      updatePhotosNav();
+      renderCurrentPhotosList();
+    },
+    onOpen: (a) => showPhotosDetail(a),
+  });
+}
+
+function showPhotosView() {
+  document.getElementById('dashboard-screen').classList.remove('visible');
+  document.getElementById('photos-screen').classList.add('visible');
+  renderCurrentPhotosList();
+}
+
+async function showPhotosDetail(activity) {
+  const body = document.getElementById('photos-screen-body');
+  await renderPhotosDetail(body, activity, {
+    onBack: () => showPhotosView(),
+  });
+}
+
+function updatePhotosNav() {
+  const btn   = document.getElementById('btn-photos-view');
+  const badge = document.getElementById('photos-count-badge');
+  if (!btn) return;
+  const n = photoMatchSummary?.matched || 0;
+  if (n > 0) {
+    btn.classList.add('available');
+    if (badge) badge.textContent = `(${n})`;
+  } else {
+    btn.classList.remove('available');
+    if (badge) badge.textContent = '';
+  }
 }
 
 function showDuplicateBanner() {
@@ -651,7 +752,7 @@ function applyHeatmapFilter(filtered) {
     const act   = _renderedActivities[i];
     const poly  = _renderedPolylines[i];
     if (!poly || !act) continue;
-    const color = TYPE_COLORS[act.type] || TYPE_COLORS.Other;
+    const color = styleColor(act, _darkMode);
     if (!hasFilter || filteredIds.has(act.id)) {
       poly.setStyle({ color, ...routeStyle(_darkMode) });
     } else {
@@ -796,11 +897,20 @@ function setUnits(newUnits) {
 document.addEventListener('DOMContentLoaded', () => {
 
   // Upload zones + Go button
-  SOURCES.forEach(setupUploadZone);
-  SOURCES.forEach(s => updateZoneUI(s));
+  const ALL_ZONES = SOURCES.concat(PHOTO_SOURCES);
+  ALL_ZONES.forEach(setupUploadZone);
+  ALL_ZONES.forEach(s => updateZoneUI(s));
   updateGoButton();
 
   document.getElementById('btn-go')?.addEventListener('click', parseAllStaged);
+
+  // Photos view nav
+  document.getElementById('btn-photos-view')?.addEventListener('click', showPhotosView);
+  document.getElementById('btn-photos-back')?.addEventListener('click', () => {
+    document.getElementById('photos-screen').classList.remove('visible');
+    document.getElementById('dashboard-screen').classList.add('visible');
+    setTimeout(() => heatmapInstance?.invalidateSize(), 100);
+  });
 
   // Duplicate banner
   document.getElementById('btn-dup-review')?.addEventListener('click', () => {
@@ -898,6 +1008,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (val) val.textContent = `${e.target.value}×`;
   });
 
+  // Heatmap style toggle (By type / Frequency)
+  document.querySelectorAll('.hm-style-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const style = btn.dataset.style;
+      if (getHeatStyle() === style) return;
+      setHeatStyle(style);
+      document.querySelectorAll('.hm-style-btn').forEach(b =>
+        b.classList.toggle('active', b === btn)
+      );
+      applyHeatmapFilter(getFilteredActivities());
+    });
+  });
+
 });
 
 
@@ -968,7 +1091,7 @@ function tlStep() {
   const act  = _renderedActivities[idx];
   if (!poly || !act) { tlIdx++; tlStep(); return; }
 
-  const color = TYPE_COLORS[act.type] || TYPE_COLORS.Other;
+  const color = styleColor(act, _darkMode);
 
   // Flash in bright, then settle to normal visible opacity
   poly.setStyle({ color: '#ffffff', weight: 4, opacity: 1 });
@@ -1047,8 +1170,8 @@ export function tlStop() {
   // Restore normal opacity
   for (let i = 0; i < _renderedPolylines.length; i++) {
     const act = _renderedActivities[i];
-    const color = TYPE_COLORS[act?.type] || TYPE_COLORS.Other;
-    _renderedPolylines[i]?.setStyle({ color, ...routeStyle(_darkMode) });
+    if (!act) continue;
+    _renderedPolylines[i]?.setStyle({ color: styleColor(act, _darkMode), ...routeStyle(_darkMode) });
   }
 }
 
