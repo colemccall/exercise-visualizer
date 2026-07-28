@@ -21,8 +21,13 @@
  *   videoPlaySec      (3..30s, default 8) — cap on video hold; actual is min(dur, cap)
  */
 
-import { drawFrame, makeCamera, loadBasemapTiles, computeBBox, bestZoomForBBox, defaultSize, drawTitleCard } from './composite.js';
+import { drawFrame, makeCamera, loadBasemapTiles, computeBBox, bestZoomForBBox, defaultSize, drawIntroFrame } from './composite.js';
 import { ensurePhotoURL } from './heic.js';
+
+// State/country-scale zoom for the cinematic intro. One tile at this zoom
+// covers ~1200km, and loadBasemapTiles pads by 1 tile in each direction —
+// so even a small route bbox gets a 3×3 tile grid = ~3600km of context.
+const INTRO_WIDE_ZOOM = 5;
 
 const FPS = 30;
 
@@ -240,30 +245,43 @@ export async function exportTourVideo({ activity, opts = {} }) {
   const tileZoom = mode === 'follow' ? followZoom : overviewZoom;
   const routeCenter = [(bbox.minLat + bbox.maxLat) / 2, (bbox.minLng + bbox.maxLng) / 2];
 
+  // Load basemap tiles for BOTH the main animation and (if intro is on)
+  // the wide state/country view. Both are awaited before we start
+  // MediaRecorder, so the intro is never blank while tiles are downloading.
   onProgress(22, 'Loading map tiles…');
   const tileSets = [];
   const mainTiles = await loadBasemapTiles(bbox, tileZoom, (frac) => {
-    onProgress(22 + Math.round(frac * 18), 'Loading map tiles…');
+    onProgress(22 + Math.round(frac * 12), 'Loading map tiles…');
   });
   tileSets.push(mainTiles);
+
+  if (intro) {
+    onProgress(34, 'Loading intro tiles…');
+    const wideTiles = await loadBasemapTiles(bbox, INTRO_WIDE_ZOOM, (frac) => {
+      onProgress(34 + Math.round(frac * 6), 'Loading intro tiles…');
+    });
+    tileSets.push(wideTiles);
+  }
   onProgress(40, 'Recording…');
 
-  // Prepend intro segment if enabled. Intro is now a self-contained title
-  // card (dark background + trip name + subtitle) — no tiles, no network,
-  // always guaranteed to render, and the user's own trip name is front
-  // and center instead of a fuzzy geocoded location.
+  // Prepend intro segment if enabled. The intro is a cinematic zoom-in:
+  // camera starts at INTRO_WIDE_ZOOM (state/country view) and eases into
+  // the route's overview zoom over `introSec` seconds. Text overlay uses
+  // the trip name the user typed (or a sensible fallback).
   if (intro) {
     const introMs = introSec * 1000;
-    const cardTitle = userTitle || activity.name || `${activity.type} · ${formatShortDate(activity.date)}`;
     const distStr = routeKm >= 1 ? `${routeKm.toFixed(1)} km` : `${Math.round(routeKm * 1000)} m`;
     const durStr = activity.duration_s > 0 ? formatDuration(activity.duration_s) : '';
-    const cardSubtitle = [formatShortDate(activity.date), distStr, durStr].filter(Boolean).join(' · ');
+    const introTitle = userTitle || activity.name || `${activity.type} · ${formatShortDate(activity.date)}`;
+    const introSubtitle = [formatShortDate(activity.date), distStr, durStr].filter(Boolean).join(' · ');
     for (const s of segments) { s.startMs += introMs; s.endMs += introMs; }
     segments.unshift({
       kind: 'intro',
       startMs: 0, endMs: introMs,
-      cardTitle,
-      cardSubtitle,
+      wideZoom: INTRO_WIDE_ZOOM,
+      mainZoom: overviewZoom,
+      title: introTitle,
+      subtitle: introSubtitle,
     });
   }
   const finalTotalMs = segments.length ? segments[segments.length - 1].endMs : totalMs;
@@ -294,19 +312,27 @@ export async function exportTourVideo({ activity, opts = {} }) {
       }
       const seg = findSegment(segments, t);
 
-      // Intro segment: dark title card with the trip name + a subtitle.
-      // Text fades in, holds, then fades out; the last ~200ms blends back
-      // to nothing before the main animation snaps in.
+      // Intro segment: cinematic zoom-in. Camera starts at state-scale
+      // zoom and eases into the route's overview zoom over introSec.
+      // Text fades in fast, holds most of the intro, fades out at the end
+      // so the main animation snaps in cleanly.
       if (seg.kind === 'intro') {
         const local = (t - seg.startMs) / Math.max(1, seg.endMs - seg.startMs);
-        const alpha = local < 0.2 ? (local / 0.2)
-                     : local > 0.85 ? Math.max(0, 1 - (local - 0.85) / 0.15)
-                     : 1;
-        drawTitleCard(ctx, {
+        const zoom = seg.wideZoom + (seg.mainZoom - seg.wideZoom) * easeInOutCubic(local);
+        // Full-frame viewport so tiles fill the entire canvas
+        const introViewport = { x: 0, y: 0, w: size.w, h: size.h };
+        const camera = makeCamera(routeCenter, zoom, introViewport);
+        const textAlpha = local < 0.15 ? (local / 0.15)
+                        : local > 0.85 ? Math.max(0, 1 - (local - 0.85) / 0.15)
+                        : 1;
+        drawIntroFrame(ctx, {
           size,
-          title: seg.cardTitle,
-          subtitle: seg.cardSubtitle,
-          alpha,
+          camera,
+          tileSet: tileSets,
+          route,
+          title: seg.title,
+          subtitle: seg.subtitle,
+          textAlpha,
           accent: '#dc2626',
         });
         onProgress(40 + Math.round((t / finalTotalMs) * 55), 'Recording…');

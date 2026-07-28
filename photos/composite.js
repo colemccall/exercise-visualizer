@@ -169,6 +169,98 @@ export function makeCamera(center, zoom, viewport) {
 }
 
 /**
+ * Draw the intro frame: full-frame basemap (zoomed out), route line if
+ * visible at the current zoom, dark overlay to make text readable, then
+ * the title + subtitle. Meant for the cinematic zoom-in intro where the
+ * camera glides from a wide state/country view into the route overview.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {{
+ *   size: {w:number,h:number},
+ *   camera: object,             // makeCamera() with FULL-FRAME viewport
+ *   tileSet: object|object[],   // one or more basemap tilesets
+ *   route: [number,number][],   // full route polyline
+ *   title: string,
+ *   subtitle?: string,
+ *   textAlpha: number,          // 0..1 fade
+ *   accent?: string,
+ * }} spec
+ */
+export function drawIntroFrame(ctx, { size, camera, tileSet, route, title, subtitle, textAlpha, accent = '#dc2626' }) {
+  // Solid dark backdrop — visible if any tiles fail or are still upscaling
+  ctx.fillStyle = '#0f0f13';
+  ctx.fillRect(0, 0, size.w, size.h);
+
+  // Full-frame basemap
+  if (camera && tileSet) camera.drawBasemap(ctx, tileSet);
+
+  // Route line — barely visible when zoomed out (a few pixels), becomes
+  // more prominent as the camera zooms in. Nice touch for the reveal.
+  if (route && route.length > 1 && camera) {
+    ctx.save();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let i = 0; i < route.length; i++) {
+      const [x, y] = camera.project(route[i]);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Dark scrim so title reads over any tile
+  ctx.fillStyle = 'rgba(0,0,0,0.42)';
+  ctx.fillRect(0, 0, size.w, size.h);
+
+  drawIntroText(ctx, { size, title, subtitle, alpha: textAlpha, accent });
+}
+
+/**
+ * Text-only overlay used by drawIntroFrame. Centered accent bar + big
+ * uppercase title + smaller subtitle. Drop shadow for legibility over
+ * any background.
+ */
+export function drawIntroText(ctx, { size, title, subtitle, alpha, accent = '#dc2626' }) {
+  if (alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.85)';
+  ctx.shadowBlur = 18;
+  ctx.shadowOffsetY = 3;
+
+  // Accent bar
+  ctx.fillStyle = accent;
+  const barW = 60, barH = 4;
+  ctx.fillRect((size.w - barW) / 2, size.h * 0.35, barW, barH);
+
+  // Title (wraps if very long)
+  ctx.fillStyle = '#ffffff';
+  const titleFont = 'bold 60px "Barlow Condensed", "Barlow", Impact, system-ui, sans-serif';
+  const lines = wrapText(ctx, (title || '').toUpperCase(), titleFont, size.w - 100);
+  ctx.font = titleFont;
+  const lineH = 70;
+  const cy = size.h * 0.47;
+  const startY = cy - ((lines.length - 1) * lineH) / 2;
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], size.w / 2, startY + i * lineH);
+  }
+
+  if (subtitle) {
+    ctx.font = '400 20px Inter, system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fillText(subtitle, size.w / 2, startY + lines.length * lineH + 10);
+  }
+
+  ctx.restore();
+}
+
+/**
  * Draw a self-contained title card — used during the cinematic intro.
  * No tiles, no network — just a dark background with the trip name and a
  * subtitle. Fades in fast, holds, fades out.
