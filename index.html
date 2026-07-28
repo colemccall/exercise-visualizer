@@ -363,6 +363,52 @@
       .pd-preview { width: 72%; }
     }
 
+    /* ── Share (video export) modal ────────────────────────────── */
+    .pd-share-modal {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 2100;
+      display: flex; align-items: center; justify-content: center;
+      padding: var(--sp-4);
+    }
+    .pd-share-modal[hidden] { display: none; }
+    .pd-share-inner {
+      background: var(--surface);
+      color: var(--text);
+      border-radius: var(--radius-lg);
+      width: 100%;
+      max-width: 480px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+      overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    .pd-share-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: var(--sp-3) var(--sp-4);
+      border-bottom: 1px solid var(--border);
+    }
+    .pd-share-title { font-family: var(--font-display); font-size: 18px; font-weight: 700; }
+    .pd-share-close { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-mid); }
+    .pd-share-body { padding: var(--sp-4); }
+    .pd-share-hint { font-size: 12px; color: var(--text-muted); margin-top: 0; margin-bottom: var(--sp-4); }
+    .pd-share-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--sp-3); }
+    .pd-share-row label { font-size: 12px; color: var(--text-mid); display: flex; justify-content: space-between; }
+    .pd-share-row label span { color: var(--text); font-weight: 600; }
+    .pd-share-row input[type=range] { width: 100%; }
+    .pd-share-status { margin-top: var(--sp-3); }
+    .pd-share-progress {
+      height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden;
+    }
+    #pd-share-progress-fill {
+      height: 100%; width: 0%; background: var(--accent); transition: width 200ms ease;
+    }
+    .pd-share-status-label { margin-top: 4px; font-size: 11px; color: var(--text-muted); }
+    .pd-share-footer {
+      display: flex; gap: var(--sp-2); justify-content: flex-end;
+      padding: var(--sp-3) var(--sp-4);
+      border-top: 1px solid var(--border);
+    }
+
     .pd-preview-unmute {
       position: absolute;
       bottom: 12px;

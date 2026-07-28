@@ -8,6 +8,7 @@
 import { renderRoute } from '../map/route.js';
 import { ensurePhotoURL } from './heic.js';
 import { ensureVideoPoster } from './video.js';
+import { exportTourVideo, downloadBlob } from './export.js';
 
 let _tourTimer = null;
 let _tourIdx = 0;
@@ -35,6 +36,7 @@ export async function renderPhotosDetail(container, activity, opts) {
         <button class="tl-btn" id="pd-prev" title="Previous">&larr;</button>
         <button class="tl-btn" id="pd-play" title="Play tour">&#9654; Play</button>
         <button class="tl-btn" id="pd-next" title="Next">&rarr;</button>
+        <button class="tl-btn" id="pd-share" title="Export tour as video">&#128190; Share</button>
       </div>
     </div>
 
@@ -65,6 +67,40 @@ export async function renderPhotosDetail(container, activity, opts) {
         <div id="pd-lightbox-media" class="pd-lightbox-media"></div>
         <div id="pd-lightbox-caption" class="pd-lightbox-caption"></div>
         <button class="pd-lightbox-close" id="pd-lightbox-close">&times;</button>
+      </div>
+    </div>
+
+    <div id="pd-share-modal" class="pd-share-modal" hidden>
+      <div class="pd-share-inner">
+        <div class="pd-share-header">
+          <div class="pd-share-title">Export tour as video</div>
+          <button class="pd-share-close" id="pd-share-close">&times;</button>
+        </div>
+        <div class="pd-share-body">
+          <p class="pd-share-hint">
+            Renders your photo tour to a shareable WebM file — plays inline in Twitter/X, iMessage, Discord, WhatsApp, and Slack.
+          </p>
+          <div class="pd-share-row">
+            <label>Speed <span id="pd-share-speed-val">1.0×</span></label>
+            <input type="range" id="pd-share-speed" min="0.5" max="3" step="0.1" value="1" />
+          </div>
+          <div class="pd-share-row">
+            <label>Pause on photos <span id="pd-share-hold-val">3s</span></label>
+            <input type="range" id="pd-share-hold" min="1" max="8" step="1" value="3" />
+          </div>
+          <div class="pd-share-row">
+            <label>Extra pause after videos <span id="pd-share-tail-val">1s</span></label>
+            <input type="range" id="pd-share-tail" min="0" max="3" step="1" value="1" />
+          </div>
+          <div class="pd-share-status" id="pd-share-status" hidden>
+            <div class="pd-share-progress"><div id="pd-share-progress-fill"></div></div>
+            <div id="pd-share-status-label" class="pd-share-status-label"></div>
+          </div>
+        </div>
+        <div class="pd-share-footer">
+          <button class="bs-btn bs-btn-secondary" id="pd-share-cancel">Cancel</button>
+          <button class="bs-btn" id="pd-share-go">Export</button>
+        </div>
       </div>
     </div>
   `;
@@ -152,6 +188,75 @@ export async function renderPhotosDetail(container, activity, opts) {
   const closeLightbox = () => { lb.hidden = true; media.innerHTML = ''; };
   container.querySelector('#pd-lightbox-close').addEventListener('click', closeLightbox);
   lb.addEventListener('click', (e) => { if (e.target === lb) closeLightbox(); });
+
+  // Share (export tour as video) modal
+  wireShareModal(container, activity);
+}
+
+function wireShareModal(container, activity) {
+  const modal = container.querySelector('#pd-share-modal');
+  const openBtn  = container.querySelector('#pd-share');
+  const closeBtn = container.querySelector('#pd-share-close');
+  const cancelBtn = container.querySelector('#pd-share-cancel');
+  const goBtn = container.querySelector('#pd-share-go');
+  const speedIn = container.querySelector('#pd-share-speed');
+  const holdIn  = container.querySelector('#pd-share-hold');
+  const tailIn  = container.querySelector('#pd-share-tail');
+  const speedLbl = container.querySelector('#pd-share-speed-val');
+  const holdLbl  = container.querySelector('#pd-share-hold-val');
+  const tailLbl  = container.querySelector('#pd-share-tail-val');
+  const statusEl = container.querySelector('#pd-share-status');
+  const statusLbl = container.querySelector('#pd-share-status-label');
+  const progFill  = container.querySelector('#pd-share-progress-fill');
+
+  const close = () => {
+    if (goBtn.disabled) return; // don't close mid-render
+    modal.hidden = true;
+    statusEl.hidden = true;
+    statusLbl.textContent = '';
+    progFill.style.width = '0%';
+  };
+
+  openBtn.addEventListener('click', () => { modal.hidden = false; });
+  closeBtn.addEventListener('click', close);
+  cancelBtn.addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+  speedIn.addEventListener('input', () => { speedLbl.textContent = `${(+speedIn.value).toFixed(1)}×`; });
+  holdIn.addEventListener('input',  () => { holdLbl.textContent  = `${holdIn.value}s`; });
+  tailIn.addEventListener('input',  () => { tailLbl.textContent  = `${tailIn.value}s`; });
+
+  goBtn.addEventListener('click', async () => {
+    goBtn.disabled = true;
+    cancelBtn.disabled = true;
+    closeBtn.disabled = true;
+    statusEl.hidden = false;
+    try {
+      const blob = await exportTourVideo({
+        activity,
+        opts: {
+          speedMultiplier: +speedIn.value,
+          photoHoldMs: +holdIn.value * 1000,
+          videoTailMs: +tailIn.value * 1000,
+          onProgress: (pct, label) => {
+            progFill.style.width = `${pct}%`;
+            if (label) statusLbl.textContent = `${label} ${pct}%`;
+          },
+        },
+      });
+      const dateStr = activity.date ? activity.date.toISOString().slice(0, 10) : 'tour';
+      const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+      downloadBlob(blob, `workout-tour-${dateStr}.${ext}`);
+      statusLbl.textContent = 'Saved to Downloads';
+    } catch (err) {
+      console.error('[share] export failed', err);
+      statusLbl.textContent = `Failed: ${err.message || err}`;
+    } finally {
+      goBtn.disabled = false;
+      cancelBtn.disabled = false;
+      closeBtn.disabled = false;
+    }
+  });
 }
 
 function activate(container, entries, idx, { openLightbox, fly }) {
