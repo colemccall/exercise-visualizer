@@ -117,6 +117,8 @@ function loadTile(url) {
  * draw the pre-loaded basemap tiles into that viewport.
  */
 export function makeCamera(center, zoom, viewport) {
+  // Support fractional zoom for smooth intro animations. Basemap tiles are
+  // loaded at integer zooms; we pick the closest loaded set and scale.
   const [cx, cy] = latLngToWorldPx(center[0], center[1], zoom);
   const originX = cx - viewport.w / 2;
   const originY = cy - viewport.h / 2;
@@ -127,25 +129,66 @@ export function makeCamera(center, zoom, viewport) {
       const [x, y] = latLngToWorldPx(latlng[0], latlng[1], zoom);
       return [x - originX + viewport.x, y - originY + viewport.y];
     },
-    drawBasemap(ctx, tileSet) {
-      if (!tileSet || !tileSet.tiles) return;
-      // Only draw tiles at the same zoom we loaded.
-      if (tileSet.zoom !== zoom) return;
+    /**
+     * Draw basemap using whichever tileset is closest to our current zoom.
+     * Tiles are scaled by 2^(currentZoom - tileZoom) so they align.
+     * Accepts either a single tileSet or an array of tilesets.
+     */
+    drawBasemap(ctx, tileSetOrList) {
+      const list = Array.isArray(tileSetOrList) ? tileSetOrList : (tileSetOrList ? [tileSetOrList] : []);
+      if (!list.length) return;
+      // Pick tileset with zoom closest to (but not much greater than) our
+      // current zoom so we upscale rather than downscale where possible.
+      let best = list[0];
+      let bestDist = Math.abs(zoom - best.zoom);
+      for (const t of list) {
+        const d = Math.abs(zoom - t.zoom);
+        if (d < bestDist) { best = t; bestDist = d; }
+      }
+      const tileScale = Math.pow(2, zoom - best.zoom);
+      const drawn = TILE_SIZE * tileScale;
+      // Re-project origins at the tileset's native zoom
+      const [tcx, tcy] = latLngToWorldPx(center[0], center[1], best.zoom);
+      const tOriginX = tcx - (viewport.w / 2) / tileScale;
+      const tOriginY = tcy - (viewport.h / 2) / tileScale;
+
       ctx.save();
       ctx.beginPath();
       roundRect(ctx, viewport.x, viewport.y, viewport.w, viewport.h, 18);
       ctx.clip();
-      for (const { tx, ty, img } of tileSet.tiles) {
-        const dx = tx * TILE_SIZE - originX + viewport.x;
-        const dy = ty * TILE_SIZE - originY + viewport.y;
-        // Skip tiles fully outside viewport
-        if (dx + TILE_SIZE < viewport.x || dx > viewport.x + viewport.w) continue;
-        if (dy + TILE_SIZE < viewport.y || dy > viewport.y + viewport.h) continue;
-        try { ctx.drawImage(img, dx, dy); } catch {}
+      for (const { tx, ty, img } of best.tiles) {
+        const dx = (tx * TILE_SIZE - tOriginX) * tileScale + viewport.x;
+        const dy = (ty * TILE_SIZE - tOriginY) * tileScale + viewport.y;
+        if (dx + drawn < viewport.x || dx > viewport.x + viewport.w) continue;
+        if (dy + drawn < viewport.y || dy > viewport.y + viewport.h) continue;
+        try { ctx.drawImage(img, dx, dy, drawn, drawn); } catch {}
       }
       ctx.restore();
     },
   };
+}
+
+/**
+ * Draw a large centered text overlay — used during the cinematic intro to
+ * name the location ("Cincinnati, Ohio"). Fades in and out based on alpha.
+ */
+export function drawIntroOverlay(ctx, { size, text, alpha }) {
+  if (!text || alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // Drop shadow for readability over any basemap
+  ctx.shadowColor = 'rgba(0,0,0,0.7)';
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetY = 2;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 52px "Barlow Condensed", "Barlow", Impact, system-ui, sans-serif';
+  // Track-out (spaced) uppercase for a poster feel
+  const words = text.toUpperCase().split(/\s+/);
+  const y = size.h * 0.4;
+  ctx.fillText(words.join('  '), size.w / 2, y);
+  ctx.restore();
 }
 
 /**

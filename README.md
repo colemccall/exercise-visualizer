@@ -24,8 +24,19 @@ Your files never leave the browser. There is no server, no account, no cloud sto
 - Each media item is matched to the workout that was underway when it was taken (EXIF timestamp → workout start/end window, adjustable ±0–30 min)
 - If the photo has EXIF GPS it's plotted directly; otherwise the position is interpolated from the workout's GPX trackpoints
 - Per-workout detail view shows the route, small photo markers on the map, and a full grid of every attached photo — click any tile to open a lightbox and fly the map to that spot
-- **Tour mode** (Play/Prev/Next) auto-advances through photos in chronological order
-- HEIC images and MP4/MOV videos are supported (HEIC is decoded via lazy-loaded `libheif-js`; video markers show a first-frame poster with a play badge)
+- **Cinema tour mode** — press Play to enter a full-screen tour. The dot traces the entire route in three-phase transits (zoom-out to preview the route slice, animate the dot at a constant km/s, zoom in on the next photo). Split screen shows the active photo/video during each hold; the map full-screens during transits. Videos autoplay with sound (falls back to muted + tap-to-unmute if the browser blocks it).
+- HEIC images and MP4/MOV videos are supported (HEIC is decoded via lazy-loaded `libheif-js`; MP4/MOV timestamps come from QuickTime atoms via exifr).
+
+### Share as video
+
+Every workout's Photo Tour has a **Share** button that renders the animation to a **WebM file** so you can post it. Plays inline in Twitter/X, iMessage, Discord, WhatsApp, and Slack. All rendering happens client-side via `canvas.captureStream` + `MediaRecorder` — no server, no wasm.
+
+- **Camera style**: *Overview* (whole route always visible) or *Follow the route* (camera tracks the dot at a tighter zoom)
+- **Cinematic intro** (optional, default on): first few seconds start at a state/country-scale view with a "City, State" text overlay (reverse-geocoded via OpenStreetMap Nominatim), then zoom in to the route
+- **Trip name** field — puts your own label in the video header
+- **Live estimated length** — the "≈ Ns" label updates as you tweak sliders
+- Sliders for **animation speed** (dot moves at a constant km/s regardless of GPX density), **photo pause**, and **max video play time**
+- Real CartoDB Positron basemap tiles drawn under the route; moving red dot sits exactly on a solid tour polyline (no drift between dot and trace)
 
 ### Charts
 - Monthly distance stacked by activity type
@@ -93,9 +104,11 @@ charts/             — D3 v7 charts
 photos/
   matcher.js        — pair photos to workouts, interpolate GPS from GPX time
   list.js           — workouts-with-photos list
-  detail.js         — route + photo grid + tour + lightbox
+  detail.js         — route + photo grid + cinema tour + share modal
   heic.js           — lazy libheif-js decoder
   video.js          — first-frame poster capture via <video> + canvas
+  composite.js      — per-frame drawing (basemap tiles + route + dot + media + intro text)
+  export.js         — WebM render pipeline (timeline, MediaRecorder, Nominatim geocode)
 scripts/
   prepare_photos.py — optional offline EXIF extractor
 ```
@@ -123,10 +136,12 @@ Every parser produces the same shape so the UI never touches raw source data:
 
 Everything runs in the browser. No fitness data, no photo bytes, and no metadata are sent to any server. The only external HTTP requests are:
 
-- Leaflet tile requests to `arcgisonline.com` (for the basemap)
+- Leaflet tile requests to `arcgisonline.com` (dashboard heatmap basemap)
+- CartoDB tile requests to `basemaps.cartocdn.com` (video export basemap)
+- One Nominatim reverse-geocode call to `nominatim.openstreetmap.org` per video export when the cinematic intro is enabled — sends the route's center lat/lng (not any personal data) and receives back a city/state label
 - ESM script downloads from `jsdelivr.net` (D3, exifr, libheif-js) — happens once per page load and is cacheable
 
-If you want fully offline operation, vendor those two CDNs locally.
+If you want fully offline operation, vendor the CDNs locally and turn off the cinematic intro when exporting.
 
 ---
 

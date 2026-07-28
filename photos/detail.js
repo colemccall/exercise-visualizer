@@ -96,11 +96,25 @@ export async function renderPhotosDetail(container, activity, opts) {
             Animates the workout: dot traces the whole route, pausing at each photo. Renders a WebM that plays inline in Twitter/X, iMessage, Discord, WhatsApp, and Slack.
           </p>
           <div class="pd-share-row">
+            <label>Trip name</label>
+            <input type="text" id="pd-share-title" class="pd-share-input" maxlength="60" placeholder="e.g. Sunday long run" />
+          </div>
+          <div class="pd-share-row">
             <label>Camera style</label>
             <select id="pd-share-mode" class="pd-share-select">
               <option value="overview" selected>Overview — whole route always visible</option>
               <option value="follow">Follow the route — zoomed in, camera tracks the dot</option>
             </select>
+          </div>
+          <div class="pd-share-row pd-share-check-row">
+            <label class="pd-share-check">
+              <input type="checkbox" id="pd-share-intro" checked />
+              <span>Cinematic intro — start with a state/country view + location label</span>
+            </label>
+          </div>
+          <div class="pd-share-row" id="pd-share-intro-row">
+            <label>Intro length <span id="pd-share-introlen-val">3s</span></label>
+            <input type="range" id="pd-share-introlen" min="2" max="5" step="1" value="3" />
           </div>
           <div class="pd-share-row">
             <label>Animation speed <span id="pd-share-speed-val">1.0×</span></label>
@@ -224,10 +238,18 @@ function wireShareModal(container, activity) {
   const closeBtn = container.querySelector('#pd-share-close');
   const cancelBtn = container.querySelector('#pd-share-cancel');
   const goBtn = container.querySelector('#pd-share-go');
+  const titleIn = container.querySelector('#pd-share-title');
   const modeIn  = container.querySelector('#pd-share-mode');
+  const introIn = container.querySelector('#pd-share-intro');
+  const introLenIn = container.querySelector('#pd-share-introlen');
+  const introLenLbl = container.querySelector('#pd-share-introlen-val');
+  const introRow = container.querySelector('#pd-share-intro-row');
   const speedIn = container.querySelector('#pd-share-speed');
   const holdIn  = container.querySelector('#pd-share-hold');
   const vidIn   = container.querySelector('#pd-share-vid');
+
+  // Prefill trip name from the activity's title
+  if (titleIn && activity.name) titleIn.value = activity.name;
   const speedLbl = container.querySelector('#pd-share-speed-val');
   const holdLbl  = container.querySelector('#pd-share-hold-val');
   const vidLbl   = container.querySelector('#pd-share-vid-val');
@@ -241,8 +263,14 @@ function wireShareModal(container, activity) {
       animSpeed: +speedIn.value,
       photoPauseSec: +holdIn.value,
       videoPlaySec: +vidIn.value,
+      intro: introIn.checked,
+      introSec: +introLenIn.value,
     });
     estimateVal.textContent = `≈ ${secs}s`;
+  };
+
+  const syncIntroVisibility = () => {
+    introRow.style.display = introIn.checked ? '' : 'none';
   };
 
   const close = () => {
@@ -253,7 +281,7 @@ function wireShareModal(container, activity) {
     progFill.style.width = '0%';
   };
 
-  openBtn.addEventListener('click', () => { modal.hidden = false; updateEstimate(); });
+  openBtn.addEventListener('click', () => { modal.hidden = false; syncIntroVisibility(); updateEstimate(); });
   closeBtn.addEventListener('click', close);
   cancelBtn.addEventListener('click', close);
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
@@ -261,6 +289,8 @@ function wireShareModal(container, activity) {
   speedIn.addEventListener('input', () => { speedLbl.textContent = `${(+speedIn.value).toFixed(1)}×`; updateEstimate(); });
   holdIn.addEventListener('input',  () => { holdLbl.textContent  = `${holdIn.value}s`; updateEstimate(); });
   vidIn.addEventListener('input',   () => { vidLbl.textContent   = `${vidIn.value}s`; updateEstimate(); });
+  introIn.addEventListener('change', () => { syncIntroVisibility(); updateEstimate(); });
+  introLenIn.addEventListener('input', () => { introLenLbl.textContent = `${introLenIn.value}s`; updateEstimate(); });
 
   goBtn.addEventListener('click', async () => {
     goBtn.disabled = true;
@@ -271,7 +301,10 @@ function wireShareModal(container, activity) {
       const blob = await exportTourVideo({
         activity,
         opts: {
+          title: titleIn.value,
           mode: modeIn.value,
+          intro: introIn.checked,
+          introSec: +introLenIn.value,
           animSpeed: +speedIn.value,
           photoPauseSec: +holdIn.value,
           videoPlaySec: +vidIn.value,
@@ -366,6 +399,29 @@ function makeMarkerHTML(url, interpolated, isVideo) {
  * route[floor(idx)] → route[ceil(idx)] interpolated linearly, so it stays on
  * the polyline that Leaflet already drew.
  */
+/**
+ * Cumulative distance from route[0] to route[i], in km. Used so transit
+ * segments take time proportional to REAL distance, not to the number of
+ * GPS trackpoints between them (which can vary wildly with sampling rate).
+ */
+function computeCumulativeKm(route) {
+  const cum = [0];
+  for (let i = 1; i < route.length; i++) {
+    cum.push(cum[i - 1] + haversineKm(route[i - 1], route[i]));
+  }
+  return cum;
+}
+
+function haversineKm([lat1, lng1], [lat2, lng2]) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function buildTourTimeline(routePts, entries) {
   // routePts: array of {lat, lng, time?} from activity.route_points
   // Preserve the FULL polyline as [lat,lng] pairs — the dot slides along
@@ -409,17 +465,21 @@ function buildTourTimeline(routePts, entries) {
     return ta - tb;
   });
 
+  // Distance-weighted transits: dot moves at a constant km/s regardless of
+  // trackpoint density, so it feels the same pace across long straights and
+  // dense switchbacks.
+  const cumKm = computeCumulativeKm(route);
+  const totalKm = cumKm[N - 1] || 0.001;
+
   const segments = [];
   let cursor = 0;
   let prevIdx = 0;
   for (const oi of order) {
     const entry = entries[oi];
     const targetIdx = routeIdxs[oi];
-    // Transit even if going "backwards" (targetIdx < prevIdx) — dot follows
-    // the route in reverse, which correctly represents an out-and-back.
-    const dist = Math.abs(targetIdx - prevIdx);
-    if (dist > 0) {
-      const transitMs = Math.max(MIN_TRANSIT_MS, TRANSIT_TOTAL_MS * (dist / Math.max(1, N - 1)));
+    const segKm = Math.abs(cumKm[targetIdx] - cumKm[prevIdx]);
+    if (segKm > 0.001) {
+      const transitMs = Math.max(MIN_TRANSIT_MS, TRANSIT_TOTAL_MS * (segKm / totalKm));
       segments.push({
         kind: 'transit',
         startMs: cursor, endMs: cursor + transitMs,
@@ -439,10 +499,10 @@ function buildTourTimeline(routePts, entries) {
     cursor += holdMs;
     prevIdx = targetIdx;
   }
-  // Final transit to end of route (only if we're not already at the end)
+  // Final transit to end of route
   if (prevIdx < N - 1) {
-    const dist = (N - 1) - prevIdx;
-    const transitMs = Math.max(MIN_TRANSIT_MS, TRANSIT_TOTAL_MS * (dist / Math.max(1, N - 1)));
+    const segKm = Math.abs(cumKm[N - 1] - cumKm[prevIdx]);
+    const transitMs = Math.max(MIN_TRANSIT_MS, TRANSIT_TOTAL_MS * (segKm / totalKm));
     segments.push({
       kind: 'transit',
       startMs: cursor, endMs: cursor + transitMs,
@@ -636,7 +696,17 @@ function renderTourFrame(nowMs) {
     fIdx = seg.atRouteIdx;
   }
   const pos = routePosAtIdx(_tour.route, fIdx);
-  if (_tour.dotMarker && pos) _tour.dotMarker.setLatLng(pos);
+  // Only re-set the marker's latLng when position actually changed.
+  // Calling setLatLng every frame while Leaflet is animating a flyTo causes
+  // the dot to appear to slide independently of the map, because the pane
+  // transform and per-frame re-projection both fight for the pixel position.
+  if (_tour.dotMarker && pos) {
+    const last = _tour.dotLastLatLng;
+    if (!last || last[0] !== pos[0] || last[1] !== pos[1]) {
+      _tour.dotMarker.setLatLng(pos);
+      _tour.dotLastLatLng = pos;
+    }
+  }
 
   // Cinema layout: full during transit (map fills viewport), split during
   // hold (map | preview 50/50).
@@ -720,12 +790,24 @@ function _tour_extractRoute() {
 }
 
 function setCinemaMode(container, mode) {
+  // Fade the dot out during the CSS layout swap so viewers don't see it
+  // "glance off" while the map container is resizing. Faded back in after
+  // Leaflet has re-measured its new viewport.
+  const dotEl = _tour?.dotMarker?._path;
+  if (dotEl) {
+    dotEl.style.transition = 'opacity 120ms ease';
+    dotEl.style.opacity = '0';
+  }
   document.body.classList.toggle('cinema-full', mode === 'full');
   document.body.classList.toggle('cinema-split', mode === 'split');
-  // Re-measure the map after the layout change
-  requestAnimationFrame(() => requestAnimationFrame(() => {
+  // Wait for the CSS transition to finish (320ms) before invalidateSize,
+  // then fade the dot back in at its correctly-projected pixel position.
+  setTimeout(() => {
     try { _mapRef?.invalidateSize(); } catch {}
-  }));
+    if (dotEl) {
+      dotEl.style.opacity = '1';
+    }
+  }, 350);
 }
 
 function enterCinema(container, initialMode = 'full') {

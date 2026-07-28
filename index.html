@@ -395,7 +395,8 @@
     .pd-share-row label { font-size: 12px; color: var(--text-mid); display: flex; justify-content: space-between; }
     .pd-share-row label span { color: var(--text); font-weight: 600; }
     .pd-share-row input[type=range] { width: 100%; }
-    .pd-share-select {
+    .pd-share-select,
+    .pd-share-input {
       width: 100%;
       padding: 8px 10px;
       font-family: var(--font-body);
@@ -404,8 +405,14 @@
       background: var(--bg);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
-      cursor: pointer;
     }
+    .pd-share-select { cursor: pointer; }
+    .pd-share-check-row { flex-direction: row; }
+    .pd-share-check {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: var(--text); cursor: pointer;
+    }
+    .pd-share-check input { margin: 0; }
     .pd-share-estimate {
       margin-top: var(--sp-3);
       padding: 8px 12px;

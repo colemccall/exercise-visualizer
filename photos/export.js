@@ -21,8 +21,37 @@
  *   videoPlaySec      (3..30s, default 8) — cap on video hold; actual is min(dur, cap)
  */
 
-import { drawFrame, makeCamera, loadBasemapTiles, computeBBox, bestZoomForBBox, defaultSize } from './composite.js';
+import { drawFrame, makeCamera, loadBasemapTiles, computeBBox, bestZoomForBBox, defaultSize, drawIntroOverlay } from './composite.js';
 import { ensurePhotoURL } from './heic.js';
+
+const INTRO_WIDE_ZOOM = 5; // state/country scale
+
+/**
+ * Reverse-geocode the route's center to a display label like
+ * "Cincinnati, Ohio". Cached on the activity so re-exporting doesn't repeat
+ * the network call. Returns null on failure — caller should degrade gracefully.
+ */
+async function reverseGeocodeCenter(activity, [lat, lng]) {
+  if (activity._geocode) return activity._geocode;
+  const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=8&accept-language=en`;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const j = await res.json();
+    const a = j.address || {};
+    const place = a.city || a.town || a.village || a.hamlet || a.county;
+    const region = a.state || a.state_district || a.region;
+    const country = a.country;
+    const label = [place, region].filter(Boolean).join(', ') || country || null;
+    activity._geocode = label;
+    return label;
+  } catch {
+    return null;
+  }
+}
 
 const FPS = 30;
 
@@ -31,15 +60,22 @@ const FPS = 30;
  * from the modal as sliders move — no rendering.
  */
 /**
- * Same base-transit formula used by exportTourVideo(). Keeping them
- * synchronized here so the estimate matches the actual render.
+ * Base transit time: seconds per km of route at animSpeed=1×.
+ * User-visible formula: transit_seconds = routeKm * SEC_PER_KM / animSpeed.
+ * Predictable and consistent — a 5km run at 1× always takes 15s to trace.
  */
-function computeBaseTransitSec(routeKm) {
-  // Slower default: 25s minimum, 90s max, scales with distance.
-  return Math.max(25, Math.min(90, 20 + Math.log2(routeKm + 1) * 6));
+const SEC_PER_KM_AT_1X = 3;
+
+/**
+ * Compute transit time for a given route length and speed multiplier.
+ * Shared between the estimator and the actual renderer so the "≈ Ns"
+ * label always matches what actually gets recorded.
+ */
+function computeTransitSec(routeKm, animSpeed) {
+  return (routeKm * SEC_PER_KM_AT_1X) / Math.max(0.1, animSpeed);
 }
 
-export function estimateExportDuration(activity, { animSpeed = 1, photoPauseSec = 3, videoPlaySec = 8 } = {}) {
+export function estimateExportDuration(activity, { animSpeed = 1, photoPauseSec = 3, videoPlaySec = 8, intro = true, introSec = 3 } = {}) {
   try {
     const route = (activity.route_points || []).filter(p => p.lat !== null && p.lng !== null);
     const routeKm = totalRouteKm(route);
@@ -47,15 +83,12 @@ export function estimateExportDuration(activity, { animSpeed = 1, photoPauseSec 
     const photoCount = photos.filter(p => !p.isVideo).length;
     const videoCount = photos.filter(p => p.isVideo).length;
 
-    const baseTransitSec = computeBaseTransitSec(routeKm);
-    const transitSec = baseTransitSec / animSpeed;
-
+    const transitSec = computeTransitSec(routeKm, animSpeed);
     const photoTotal = photoCount * photoPauseSec;
-    // Assume videos play for videoPlaySec each (upper bound; real duration
-    // may be shorter and will just play through).
     const videoTotal = videoCount * videoPlaySec;
+    const introTotal = intro ? introSec : 0;
 
-    return Math.round(transitSec + photoTotal + videoTotal);
+    return Math.round(transitSec + photoTotal + videoTotal + introTotal);
   } catch (err) {
     console.warn('[export] estimate failed', err);
     return 0;
@@ -80,6 +113,9 @@ export async function exportTourVideo({ activity, opts = {} }) {
   const photoPauseMs = (opts.photoPauseSec ?? 3) * 1000;
   const videoCapMs   = (opts.videoPlaySec ?? 8) * 1000;
   const mode         = opts.mode || 'overview'; // 'overview' | 'follow'
+  const intro        = opts.intro !== false;    // default on
+  const introSec     = opts.introSec ?? 3;
+  const userTitle    = (opts.title || '').trim() || null;
   const onProgress = opts.onProgress || (() => {});
 
   onProgress(0, 'Preparing…');
@@ -122,14 +158,20 @@ export async function exportTourVideo({ activity, opts = {} }) {
         stagingRoot.appendChild(element);
         // Wait until at least one frame is decoded so drawImage produces
         // real pixels (not a black frame). HAVE_CURRENT_DATA = 2.
-        await new Promise(resolve => {
-          const done = () => resolve();
-          if (element.readyState >= 2) return done();
-          element.addEventListener('loadeddata', done, { once: true });
-          element.addEventListener('canplay', done, { once: true });
-          element.addEventListener('error', done, { once: true });
-          setTimeout(done, 3000); // safety cap
+        const loaded = await new Promise(resolve => {
+          const ok   = () => resolve(true);
+          const fail = () => {
+            const msg = element.error?.message || 'unknown';
+            console.warn(`[export] video ${p.name} failed to load: ${msg}. Codec may be unsupported by this browser (Apple HEVC/H.265 doesn't play in Chrome/Firefox).`);
+            resolve(false);
+          };
+          if (element.readyState >= 2) return ok();
+          element.addEventListener('loadeddata', ok, { once: true });
+          element.addEventListener('canplay', ok, { once: true });
+          element.addEventListener('error', fail, { once: true });
+          setTimeout(() => resolve(element.readyState >= 2), 4000); // safety
         });
+        if (!loaded) continue; // skip unreadable videos rather than embedding a black frame
       } else {
         element = await loadImage(url);
       }
@@ -153,19 +195,26 @@ export async function exportTourVideo({ activity, opts = {} }) {
   // avoids the dot zig-zagging when photos aren't in strict time order.
   preloaded.sort((a, b) => a.routeIdx - b.routeIdx);
 
-  // Build timeline — same base-transit formula as the estimator so the
-  // estimated length in the modal matches what actually renders.
+  // Build timeline — same formula as the estimator so the displayed
+  // "≈ Ns" matches what actually renders. Distance-weighted so the dot
+  // moves at a constant km/s regardless of GPX sampling density.
   const routeKm = totalRouteKm(route);
-  const baseTransitMs = computeBaseTransitSec(routeKm) * 1000;
-  const totalTransitMs = baseTransitMs / animSpeed;
+  const totalTransitMs = computeTransitSec(routeKm, animSpeed) * 1000;
+  const cumKm = new Array(N);
+  cumKm[0] = 0;
+  for (let i = 1; i < N; i++) {
+    cumKm[i] = cumKm[i - 1] + haversine(route[i - 1], route[i]);
+  }
+  const totalCumKm = cumKm[N - 1] || 0.001;
 
   const segments = [];
   let cursor = 0;
   let prevIdx = 0;
   for (const item of preloaded) {
     const targetIdx = item.routeIdx;
-    if (targetIdx > prevIdx) {
-      const transitMs = totalTransitMs * ((targetIdx - prevIdx) / Math.max(1, N - 1));
+    if (targetIdx !== prevIdx) {
+      const segKm = Math.abs(cumKm[targetIdx] - cumKm[prevIdx]);
+      const transitMs = totalTransitMs * (segKm / totalCumKm);
       segments.push({
         kind: 'transit',
         startMs: cursor, endMs: cursor + transitMs,
@@ -187,7 +236,8 @@ export async function exportTourVideo({ activity, opts = {} }) {
   }
   // Final transit to end of route
   if (prevIdx < N - 1) {
-    const transitMs = totalTransitMs * ((N - 1 - prevIdx) / Math.max(1, N - 1));
+    const segKm = Math.abs(cumKm[N - 1] - cumKm[prevIdx]);
+    const transitMs = totalTransitMs * (segKm / totalCumKm);
     segments.push({
       kind: 'transit',
       startMs: cursor, endMs: cursor + transitMs,
@@ -211,10 +261,35 @@ export async function exportTourVideo({ activity, opts = {} }) {
   const routeCenter = [(bbox.minLat + bbox.maxLat) / 2, (bbox.minLng + bbox.maxLng) / 2];
 
   onProgress(22, 'Loading map tiles…');
-  const tileSet = await loadBasemapTiles(bbox, tileZoom, (frac) => {
-    onProgress(22 + Math.round(frac * 18), 'Loading map tiles…');
+  const tileSets = [];
+  const mainTiles = await loadBasemapTiles(bbox, tileZoom, (frac) => {
+    onProgress(22 + Math.round(frac * 12), 'Loading map tiles…');
   });
+  tileSets.push(mainTiles);
+  let introLabel = null;
+  if (intro) {
+    onProgress(34, 'Loading intro tiles…');
+    const wideTiles = await loadBasemapTiles(bbox, INTRO_WIDE_ZOOM, () => {});
+    tileSets.push(wideTiles);
+    onProgress(37, 'Finding location…');
+    introLabel = await reverseGeocodeCenter(activity, routeCenter);
+  }
   onProgress(40, 'Recording…');
+
+  // Prepend intro segment if enabled
+  if (intro) {
+    const introMs = introSec * 1000;
+    // Push all existing segments back by introMs, then prepend intro
+    for (const s of segments) { s.startMs += introMs; s.endMs += introMs; }
+    segments.unshift({
+      kind: 'intro',
+      startMs: 0, endMs: introMs,
+      wideZoom: INTRO_WIDE_ZOOM,
+      mainZoom: overviewZoom,
+      label: introLabel,
+    });
+  }
+  const finalTotalMs = segments.length ? segments[segments.length - 1].endMs : totalMs;
 
   // Recording setup
   const canvas = document.createElement('canvas');
@@ -236,26 +311,50 @@ export async function exportTourVideo({ activity, opts = {} }) {
     const tick = () => {
       const now = performance.now();
       const t = now - startedAt;
-      if (t >= totalMs) {
+      if (t >= finalTotalMs) {
         playingVideos.forEach(v => { try { v.pause(); } catch {} });
         return resolve();
       }
       const seg = findSegment(segments, t);
+
+      // Intro segment: wide-zoom overview with a "City, State" text overlay.
+      // Zoom eases from INTRO_WIDE_ZOOM into the main overview zoom; the
+      // route line only becomes readable near the end of the intro when
+      // the camera has closed in enough.
+      if (seg.kind === 'intro') {
+        const local = (t - seg.startMs) / Math.max(1, seg.endMs - seg.startMs);
+        const zoom = seg.wideZoom + (seg.mainZoom - seg.wideZoom) * easeOutCubic(local);
+        const camera = makeCamera(routeCenter, zoom, mapViewport);
+        drawFrame(ctx, {
+          size, camera, tileSet: tileSets, route,
+          fIdx: 0,
+          dotLatLng: null,        // dot hidden during intro
+          media: null,
+          caption: '',
+          title: userTitle || `${activity.type} · ${formatShortDate(activity.date)}`,
+          themeAccent: '#dc2626',
+        });
+        // Text overlay fades in fast, holds, fades out at the end.
+        const alpha = local < 0.15 ? (local / 0.15)
+                     : local > 0.8 ? (1 - (local - 0.8) / 0.2)
+                     : 1;
+        drawIntroOverlay(ctx, { size, text: seg.label, alpha });
+        onProgress(40 + Math.round((t / finalTotalMs) * 55), 'Recording…');
+        return requestAnimationFrame(tick);
+      }
 
       let fIdx, activeItem;
       if (seg.kind === 'transit') {
         const local = (t - seg.startMs) / Math.max(1, seg.endMs - seg.startMs);
         const eased = easeInOutCubic(Math.max(0, Math.min(1, local)));
         fIdx = seg.fromIdx + (seg.toIdx - seg.fromIdx) * eased;
-        activeItem = null; // no photo shown during transit
+        activeItem = null;
       } else {
         fIdx = seg.atIdx;
         activeItem = seg.item;
         if (activeItem.isVideo && activeItem.element.paused && !playingVideos.has(activeItem.element)) {
           try {
             activeItem.element.currentTime = 0;
-            // Await the play promise but don't block the RAF — if it rejects
-            // we still draw the current frame each tick.
             const playPromise = activeItem.element.play();
             if (playPromise && typeof playPromise.catch === 'function') {
               playPromise.catch(err => console.warn('[export] video play rejected', err));
@@ -266,17 +365,12 @@ export async function exportTourVideo({ activity, opts = {} }) {
           playingVideos.add(activeItem.element);
         }
       }
-      // Pause any videos we've moved past
       for (const v of playingVideos) {
         if (activeItem?.element !== v) { try { v.pause(); } catch {} playingVideos.delete(v); }
       }
 
       const dotLatLng = routePosAtIdx(route, fIdx);
 
-      // Camera:
-      //   overview — locked on the route's center, whole route visible
-      //   follow   — locked on the dot at a tighter zoom, camera moves
-      //              with the current position
       const camera = (mode === 'follow' && dotLatLng)
         ? makeCamera(dotLatLng, followZoom, mapViewport)
         : makeCamera(routeCenter, overviewZoom, mapViewport);
@@ -287,20 +381,15 @@ export async function exportTourVideo({ activity, opts = {} }) {
       }
 
       drawFrame(ctx, {
-        size,
-        camera,
-        tileSet,
-        route,
-        fIdx,
-        dotLatLng,
+        size, camera, tileSet: tileSets, route,
+        fIdx, dotLatLng,
         media: activeItem?.element || null,
         caption: captionParts.join(' · '),
-        title: `${activity.type} · ${formatShortDate(activity.date)}`,
+        title: userTitle || `${activity.type} · ${formatShortDate(activity.date)}`,
         themeAccent: '#dc2626',
       });
 
-      const frac = t / totalMs;
-      onProgress(40 + Math.round(frac * 55), 'Recording…');
+      onProgress(40 + Math.round((t / finalTotalMs) * 55), 'Recording…');
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -397,6 +486,10 @@ function haversine([lat1, lng1], [lat2, lng2]) {
 
 function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function easeOutCubic(t) {
+  return 1 - Math.pow(1 - t, 3);
 }
 
 function formatShortDate(d) {
