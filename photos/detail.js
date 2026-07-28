@@ -107,6 +107,13 @@ export async function renderPhotosDetail(container, activity, opts) {
             </select>
           </div>
           <div class="pd-share-row">
+            <label>Route pacing</label>
+            <select id="pd-share-pacing" class="pd-share-select">
+              <option value="steady" selected>Steady — dot moves at constant speed</option>
+              <option value="actual">Real timing — dot pauses where you paused</option>
+            </select>
+          </div>
+          <div class="pd-share-row">
             <label>Output format</label>
             <select id="pd-share-format" class="pd-share-select">
               <option value="webm" selected>WebM — the actual encoded format</option>
@@ -240,6 +247,7 @@ function wireShareModal(container, activity) {
   const goBtn = container.querySelector('#pd-share-go');
   const titleIn = container.querySelector('#pd-share-title');
   const modeIn  = container.querySelector('#pd-share-mode');
+  const pacingIn = container.querySelector('#pd-share-pacing');
   const formatIn = container.querySelector('#pd-share-format');
   const introIn = container.querySelector('#pd-share-intro');
   const introLenIn = container.querySelector('#pd-share-introlen');
@@ -289,6 +297,7 @@ function wireShareModal(container, activity) {
         opts: {
           title: titleIn.value,
           mode: modeIn.value,
+          pacing: pacingIn.value,
           format: formatIn.value,
           intro: introIn.checked,
           introSec: +introLenIn.value,

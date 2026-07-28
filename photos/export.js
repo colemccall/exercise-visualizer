@@ -93,6 +93,7 @@ export async function exportTourVideo({ activity, opts = {} }) {
   const photoPauseMs = (opts.photoPauseSec ?? 3) * 1000;
   const videoCapMs   = 20_000; // internal cap — videos longer than 20s truncate
   const mode         = opts.mode || 'overview'; // 'overview' | 'follow'
+  const pacing       = opts.pacing || 'steady'; // 'steady' | 'actual'
   const intro        = opts.intro !== false;    // default on
   const introSec     = opts.introSec ?? 3;
   const userTitle    = (opts.title || '').trim() || null;
@@ -367,7 +368,17 @@ export async function exportTourVideo({ activity, opts = {} }) {
       if (seg.kind === 'transit') {
         const local = (t - seg.startMs) / Math.max(1, seg.endMs - seg.startMs);
         const eased = easeInOutCubic(Math.max(0, Math.min(1, local)));
-        fIdx = seg.fromIdx + (seg.toIdx - seg.fromIdx) * eased;
+        if (pacing === 'steady') {
+          // Constant km/s regardless of GPX sampling density. Long pauses
+          // where GPS logged many close-together points are traversed
+          // quickly by the dot; sparse sections aren't fast-forwarded.
+          fIdx = fIdxAtDistanceBetween(cumKm, seg.fromIdx, seg.toIdx, eased);
+        } else {
+          // 'actual' — index-linear interpolation. Where GPX has dense
+          // samples (rest, coffee break), the dot lingers at that spot,
+          // preserving the real-workout feel.
+          fIdx = seg.fromIdx + (seg.toIdx - seg.fromIdx) * eased;
+        }
         activeItem = null;
       } else {
         fIdx = seg.atIdx;
@@ -527,6 +538,33 @@ function nearestRouteIdx(route, latLng) {
     if (d < bestDist) { bestDist = d; bestIdx = i; }
   }
   return bestIdx;
+}
+
+/**
+ * Given cumulative-distance array and a start/end route index, return a
+ * continuous route index (fractional) at `progress` fraction (0..1) of the
+ * distance from start to end. Handles direction (start > end works too —
+ * covers out-and-back where the dot traces the route in reverse between
+ * two photos on opposite legs).
+ */
+function fIdxAtDistanceBetween(cumKm, startIdx, endIdx, progress) {
+  const p = Math.max(0, Math.min(1, progress));
+  const dStart = cumKm[startIdx];
+  const dEnd   = cumKm[endIdx];
+  const target = dStart + (dEnd - dStart) * p;
+  const forward = endIdx >= startIdx;
+  const lo = forward ? startIdx : endIdx;
+  const hi = forward ? endIdx : startIdx;
+  // Binary-search the [lo, hi] range for the pair straddling `target`.
+  let l = lo, h = hi;
+  while (h - l > 1) {
+    const mid = (l + h) >> 1;
+    if (cumKm[mid] <= target) l = mid; else h = mid;
+  }
+  const span = cumKm[h] - cumKm[l];
+  if (span <= 0) return l;
+  const frac = (target - cumKm[l]) / span;
+  return l + frac;
 }
 
 function routePosAtIdx(route, fIdx) {
