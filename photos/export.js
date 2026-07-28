@@ -79,6 +79,7 @@ export async function exportTourVideo({ activity, opts = {} }) {
   const animSpeed = opts.animSpeed ?? 1;
   const photoPauseMs = (opts.photoPauseSec ?? 3) * 1000;
   const videoCapMs   = (opts.videoPlaySec ?? 8) * 1000;
+  const mode         = opts.mode || 'overview'; // 'overview' | 'follow'
   const onProgress = opts.onProgress || (() => {});
 
   onProgress(0, 'Preparing…');
@@ -197,16 +198,20 @@ export async function exportTourVideo({ activity, opts = {} }) {
   const totalMs = cursor;
 
   // Camera + basemap
-  // Use a single zoom that fits the whole route (no zoom animation) so the
-  // basemap is available for every frame. Camera is fixed on the route's
-  // center; the dot moves within the viewport as it traces the route.
+  // Two modes:
+  //   'overview' — fixed camera showing the whole route the whole time.
+  //   'follow'   — camera locked to the dot at a tighter zoom, so viewers
+  //                see the terrain around the current position.
   const mapViewport = { x: 24, y: 24, w: size.w - 48, h: Math.round(size.h * 0.55) };
   const bbox = computeBBox(route);
-  const fixedZoom = bestZoomForBBox(bbox, mapViewport, 0.85);
+  const overviewZoom = bestZoomForBBox(bbox, mapViewport, 0.85);
+  // Follow-cam is 2 levels closer than the overview fit, capped at 15.
+  const followZoom = Math.min(15, overviewZoom + 2);
+  const tileZoom = mode === 'follow' ? followZoom : overviewZoom;
   const routeCenter = [(bbox.minLat + bbox.maxLat) / 2, (bbox.minLng + bbox.maxLng) / 2];
 
   onProgress(22, 'Loading map tiles…');
-  const tileSet = await loadBasemapTiles(bbox, fixedZoom, (frac) => {
+  const tileSet = await loadBasemapTiles(bbox, tileZoom, (frac) => {
     onProgress(22 + Math.round(frac * 18), 'Loading map tiles…');
   });
   onProgress(40, 'Recording…');
@@ -268,10 +273,13 @@ export async function exportTourVideo({ activity, opts = {} }) {
 
       const dotLatLng = routePosAtIdx(route, fIdx);
 
-      // Fixed camera — whole route always in view; the moving dot shows
-      // progress. Basemap tiles are pre-loaded for exactly this zoom, so
-      // every frame has a proper map.
-      const camera = makeCamera(routeCenter, fixedZoom, mapViewport);
+      // Camera:
+      //   overview — locked on the route's center, whole route visible
+      //   follow   — locked on the dot at a tighter zoom, camera moves
+      //              with the current position
+      const camera = (mode === 'follow' && dotLatLng)
+        ? makeCamera(dotLatLng, followZoom, mapViewport)
+        : makeCamera(routeCenter, overviewZoom, mapViewport);
 
       const captionParts = [];
       if (activeItem?.photo?.timestamp) {

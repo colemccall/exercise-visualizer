@@ -23,10 +23,14 @@ let _tour = null;
  *   currentSegKind,               // 'transit' | 'hold' — for cinema layout
  * }
  */
-const TRANSIT_TOTAL_MS = 15000;   // whole-route traversal takes 15s
-const PHOTO_HOLD_MS    = 4000;
-const VIDEO_MAX_MS     = 15000;   // cap for long videos in the cinema tour
-const VIDEO_TAIL_MS    = 400;
+// Cinema tour timing. Each transit is split into three phases so the map
+// has time to zoom out, pan while animating the dot, then zoom in on the
+// next photo. Total-transit is generous so the story feels cinematic.
+const TRANSIT_TOTAL_MS = 30000;   // whole-route sum of transit time
+const PHOTO_HOLD_MS    = 5000;    // per-photo hold (photo shown split-screen)
+const VIDEO_HOLD_MS    = 10000;   // per-video hold, longer so playback finishes
+const VIDEO_TAIL_MS    = 500;
+const MIN_TRANSIT_MS   = 3200;    // ensures phase splits are visible even for close photos
 
 /**
  * @param {HTMLElement} container
@@ -92,6 +96,13 @@ export async function renderPhotosDetail(container, activity, opts) {
             Animates the workout: dot traces the whole route, pausing at each photo. Renders a WebM that plays inline in Twitter/X, iMessage, Discord, WhatsApp, and Slack.
           </p>
           <div class="pd-share-row">
+            <label>Camera style</label>
+            <select id="pd-share-mode" class="pd-share-select">
+              <option value="overview" selected>Overview — whole route always visible</option>
+              <option value="follow">Follow the route — zoomed in, camera tracks the dot</option>
+            </select>
+          </div>
+          <div class="pd-share-row">
             <label>Animation speed <span id="pd-share-speed-val">1.0×</span></label>
             <input type="range" id="pd-share-speed" min="0.5" max="3" step="0.1" value="1" />
           </div>
@@ -142,7 +153,7 @@ export async function renderPhotosDetail(container, activity, opts) {
     const src = p._source || p;
     const playableURL = p.isVideo ? src.url : await ensurePhotoURL(src);
     const thumbURL    = p.isVideo ? await ensureVideoPoster(src) : playableURL;
-    entries.push({ photo: p, playableURL, thumbURL, marker: null, tile: null });
+    entries.push({ photo: p, playableURL, thumbURL, marker: null, tile: null, isVideo: !!p.isVideo });
   }
 
   // Plot map markers (small circles). Skip if map failed to render.
@@ -213,6 +224,7 @@ function wireShareModal(container, activity) {
   const closeBtn = container.querySelector('#pd-share-close');
   const cancelBtn = container.querySelector('#pd-share-cancel');
   const goBtn = container.querySelector('#pd-share-go');
+  const modeIn  = container.querySelector('#pd-share-mode');
   const speedIn = container.querySelector('#pd-share-speed');
   const holdIn  = container.querySelector('#pd-share-hold');
   const vidIn   = container.querySelector('#pd-share-vid');
@@ -259,6 +271,7 @@ function wireShareModal(container, activity) {
       const blob = await exportTourVideo({
         activity,
         opts: {
+          mode: modeIn.value,
           animSpeed: +speedIn.value,
           photoPauseSec: +holdIn.value,
           videoPlaySec: +vidIn.value,
@@ -406,7 +419,7 @@ function buildTourTimeline(routePts, entries) {
     // the route in reverse, which correctly represents an out-and-back.
     const dist = Math.abs(targetIdx - prevIdx);
     if (dist > 0) {
-      const transitMs = TRANSIT_TOTAL_MS * (dist / Math.max(1, N - 1));
+      const transitMs = Math.max(MIN_TRANSIT_MS, TRANSIT_TOTAL_MS * (dist / Math.max(1, N - 1)));
       segments.push({
         kind: 'transit',
         startMs: cursor, endMs: cursor + transitMs,
@@ -414,15 +427,14 @@ function buildTourTimeline(routePts, entries) {
       });
       cursor += transitMs;
     }
-    const holdMs = entry.isVideo
-      ? Math.min(VIDEO_MAX_MS, PHOTO_HOLD_MS * 2) + VIDEO_TAIL_MS
-      : PHOTO_HOLD_MS;
+    const isVideo = !!entry.photo.isVideo;
+    const holdMs = isVideo ? VIDEO_HOLD_MS + VIDEO_TAIL_MS : PHOTO_HOLD_MS;
     segments.push({
       kind: 'hold',
       startMs: cursor, endMs: cursor + holdMs,
       atRouteIdx: targetIdx,
       entryIdx: oi,
-      isVideo: entry.isVideo,
+      isVideo,
     });
     cursor += holdMs;
     prevIdx = targetIdx;
@@ -430,7 +442,7 @@ function buildTourTimeline(routePts, entries) {
   // Final transit to end of route (only if we're not already at the end)
   if (prevIdx < N - 1) {
     const dist = (N - 1) - prevIdx;
-    const transitMs = TRANSIT_TOTAL_MS * (dist / Math.max(1, N - 1));
+    const transitMs = Math.max(MIN_TRANSIT_MS, TRANSIT_TOTAL_MS * (dist / Math.max(1, N - 1)));
     segments.push({
       kind: 'transit',
       startMs: cursor, endMs: cursor + transitMs,
@@ -528,8 +540,19 @@ function startTour(container, entries, activity) {
   };
   enterCinema(container, 'full');
   if (_mapRef && route[0]) {
+    // Draw a solid tour polyline covering the FULL route. This sits above
+    // renderRoute's pace-colored segments (which have gaps where pace was
+    // filtered out) so the dot always visibly sits on the drawn line.
+    _tour.tourPolyline = L.polyline(route, {
+      color: '#dc2626',
+      weight: 5,
+      opacity: 0.9,
+      lineCap: 'round',
+      lineJoin: 'round',
+      className: 'tour-route-polyline',
+    }).addTo(_mapRef);
     _tour.dotMarker = L.circleMarker(route[0], {
-      radius: 10,
+      radius: 11,
       color: '#ffffff',
       weight: 3,
       fillColor: '#dc2626',
@@ -590,19 +613,33 @@ function renderTourFrame(nowMs) {
   const seg = findSegment(_tour.segments, t);
   if (!seg) return;
 
-  // Compute continuous route index
+  // Compute continuous route index — differs by segment kind and, for
+  // transit, by the current phase (zoom-out / animate / zoom-in).
   let fIdx;
+  let phase = null; // 'zoom-out' | 'animate' | 'zoom-in' | null (hold)
   if (seg.kind === 'transit') {
     const local = (t - seg.startMs) / Math.max(1, seg.endMs - seg.startMs);
-    const eased = easeInOutCubic(Math.max(0, Math.min(1, local)));
-    fIdx = seg.fromRouteIdx + (seg.toRouteIdx - seg.fromRouteIdx) * eased;
+    if (local < 0.25)      phase = 'zoom-out';
+    else if (local < 0.75) phase = 'animate';
+    else                    phase = 'zoom-in';
+
+    if (phase === 'zoom-out') {
+      fIdx = seg.fromRouteIdx;
+    } else if (phase === 'animate') {
+      const p = (local - 0.25) / 0.5;
+      const eased = easeInOutCubic(Math.max(0, Math.min(1, p)));
+      fIdx = seg.fromRouteIdx + (seg.toRouteIdx - seg.fromRouteIdx) * eased;
+    } else {
+      fIdx = seg.toRouteIdx;
+    }
   } else {
     fIdx = seg.atRouteIdx;
   }
   const pos = routePosAtIdx(_tour.route, fIdx);
   if (_tour.dotMarker && pos) _tour.dotMarker.setLatLng(pos);
 
-  // Cinema layout follows segment kind: full during transit, split during hold
+  // Cinema layout: full during transit (map fills viewport), split during
+  // hold (map | preview 50/50).
   if (seg.kind !== _tour.currentSegKind) {
     _tour.currentSegKind = seg.kind;
     setCinemaMode(_tour.container, seg.kind === 'transit' ? 'full' : 'split');
@@ -611,27 +648,51 @@ function renderTourFrame(nowMs) {
   if (seg.kind === 'hold') {
     if (seg.entryIdx !== _tour.currentPhotoIdx) {
       _tour.currentPhotoIdx = seg.entryIdx;
+      _tour.currentPhase = null;
       const entry = _tour.entries[seg.entryIdx];
       showPreview(_tour.container, entry);
-      // Update tile highlight (visible when user later exits cinema)
       activate(_tour.container, _tour.entries, seg.entryIdx, { openLightbox: false, fly: false });
-      // Follow-cam: zoom in on the photo's location so it's clear where we
-      // are. During the following transit the map pans to the next photo,
-      // and the dot moves along the route in sync.
-      if (_mapRef && pos) {
-        try { _mapRef.flyTo(pos, 14, { duration: 0.6, animate: true }); } catch {}
+      // Hold view: map already zoomed in during the preceding zoom-in phase.
+      // No-op here to avoid double flyTo. If the tour started at a hold
+      // (first segment), do the zoom-in now.
+      if (_mapRef && pos && seg === _tour.segments[0]) {
+        try { _mapRef.flyTo(pos, 15, { duration: 0.6, animate: true }); } catch {}
       }
     }
   } else if (seg.kind === 'transit') {
-    // On entry to a transit segment, start panning toward the destination
-    // photo so the map is roughly following the dot. flyTo runs on its own
-    // animation duration (matched to segment length).
-    if (_tour.lastTransitStart !== seg.startMs) {
-      _tour.lastTransitStart = seg.startMs;
-      const destPos = routePosAtIdx(_tour.route, seg.toRouteIdx);
-      if (_mapRef && destPos) {
-        const durSec = Math.max(0.5, (seg.endMs - seg.startMs) / 1000);
-        try { _mapRef.flyTo(destPos, 14, { duration: durSec, animate: true }); } catch {}
+    // Fire one flyTo per phase transition so the map animates in sync
+    // with the phase: zoom-out shows the whole transit route slice; the
+    // animate phase leaves the map static so the dot moves smoothly;
+    // zoom-in dives into the next photo's location.
+    const phaseKey = `${seg.startMs}-${phase}`;
+    if (_tour.currentPhase !== phaseKey) {
+      _tour.currentPhase = phaseKey;
+      if (_mapRef) {
+        const fromPos = routePosAtIdx(_tour.route, seg.fromRouteIdx);
+        const toPos   = routePosAtIdx(_tour.route, seg.toRouteIdx);
+        const segMs   = seg.endMs - seg.startMs;
+        try {
+          if (phase === 'zoom-out') {
+            // Fit both endpoints (and the connecting route slice) in view
+            const slice = _tour.route.slice(
+              Math.min(seg.fromRouteIdx, seg.toRouteIdx),
+              Math.max(seg.fromRouteIdx, seg.toRouteIdx) + 1,
+            );
+            const bounds = L.latLngBounds(slice.length ? slice : [fromPos, toPos]);
+            _mapRef.flyToBounds(bounds, {
+              duration: (segMs * 0.25) / 1000,
+              padding: [60, 60],
+              maxZoom: 14,
+              animate: true,
+            });
+          } else if (phase === 'zoom-in') {
+            _mapRef.flyTo(toPos, 15, {
+              duration: (segMs * 0.25) / 1000,
+              animate: true,
+            });
+          }
+          // 'animate' phase: no flyTo — map stays where zoom-out left it
+        } catch {}
       }
     }
   }
@@ -686,6 +747,9 @@ function stopTour(container) {
   if (_tour.rafId) cancelAnimationFrame(_tour.rafId);
   if (_tour.dotMarker && _mapRef) {
     try { _mapRef.removeLayer(_tour.dotMarker); } catch {}
+  }
+  if (_tour.tourPolyline && _mapRef) {
+    try { _mapRef.removeLayer(_tour.tourPolyline); } catch {}
   }
   _tour = null;
   if (container) {
