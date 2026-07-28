@@ -423,20 +423,15 @@ export async function exportTourVideo({ activity, opts = {} }) {
   let blob = new Blob(chunks, { type: mimeType });
   try { stagingRoot.remove(); } catch {}
 
-  // Optional MP4 transcode. ffmpeg.wasm is lazy-loaded here — only pulled
-  // in when the user explicitly picked MP4 in the export modal.
+  // MP4 "export" is a rename — we re-wrap the WebM bytes with an .mp4
+  // MIME type. Most players (QuickTime, VLC, iMessage, Discord, Twitter
+  // on desktop) sniff the container format and play it regardless of
+  // extension. Strict uploaders (Instagram) may still reject. Doing a
+  // real transcode would need ffmpeg.wasm + SharedArrayBuffer, which
+  // requires COOP/COEP headers that would also break the app's map
+  // tiles, so the tradeoff isn't worth it.
   if (format === 'mp4' && !blob.type.includes('mp4')) {
-    onProgress(96, 'Preparing MP4 encoder…');
-    try {
-      const { webmToMp4 } = await import('./mp4.js');
-      blob = await webmToMp4(blob, (pct, label) => {
-        // Map the ffmpeg 0..100 into our 96..100 remaining band
-        onProgress(96 + Math.round(pct * 0.04), label || 'Transcoding…');
-      });
-    } catch (err) {
-      console.warn('[export] MP4 transcode failed; delivering WebM instead', err);
-      // fall through — user still gets the WebM
-    }
+    blob = new Blob([await blob.arrayBuffer()], { type: 'video/mp4' });
   }
 
   onProgress(100, 'Done');

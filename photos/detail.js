@@ -109,8 +109,8 @@ export async function renderPhotosDetail(container, activity, opts) {
           <div class="pd-share-row">
             <label>Output format</label>
             <select id="pd-share-format" class="pd-share-select">
-              <option value="webm" selected>WebM — fast (works in most players + social apps)</option>
-              <option value="mp4">MP4 — slower first time (~25 MB one-time encoder download; needed for Instagram)</option>
+              <option value="webm" selected>WebM — the actual encoded format</option>
+              <option value="mp4">MP4 — same file with .mp4 extension (plays in QuickTime, VLC, iMessage, Discord; Instagram may reject)</option>
             </select>
           </div>
           <div class="pd-share-row pd-share-check-row">
