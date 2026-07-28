@@ -395,6 +395,15 @@
     .pd-share-row label { font-size: 12px; color: var(--text-mid); display: flex; justify-content: space-between; }
     .pd-share-row label span { color: var(--text); font-weight: 600; }
     .pd-share-row input[type=range] { width: 100%; }
+    .pd-share-estimate {
+      margin-top: var(--sp-3);
+      padding: 8px 12px;
+      background: var(--surface-2);
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      color: var(--text-mid);
+    }
+    .pd-share-estimate span { color: var(--text); font-weight: 700; }
     .pd-share-status { margin-top: var(--sp-3); }
     .pd-share-progress {
       height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden;
@@ -425,9 +434,9 @@
     .pd-preview-unmute:hover { background: rgba(0,0,0,0.9); }
 
     /* ── Cinema mode (tour Play) ────────────────────────────────────
-       When body.cinema-tour is set, the whole viewport becomes
-       map | preview. Applied at <body> level so we escape the card's
-       overflow:hidden and the map container gets natural dimensions. */
+       body.cinema-tour  → base fullscreen + hide chrome
+       body.cinema-full  → map fills viewport 100vw (during transit)
+       body.cinema-split → map | preview 50/50 (during a photo hold) */
     body.cinema-tour { overflow: hidden; }
     body.cinema-tour #photos-screen .bs-card {
       position: fixed;
@@ -447,22 +456,38 @@
       width: 100vw;
       height: 100vh;
       background: #000;
+      transition: none;
     }
     body.cinema-tour .photos-detail-map {
-      flex: 1 1 50%;
       width: auto;
-      height: 100vh;
       min-height: 0;
       min-width: 0;
+      height: 100vh;
+      transition: flex-basis 320ms ease;
     }
     body.cinema-tour .pd-preview {
       position: static;
-      flex: 1 1 50%;
-      width: auto;
-      height: 100vh;
       max-height: 100vh;
+      height: 100vh;
       border-radius: 0;
       box-shadow: none;
+      transition: flex-basis 320ms ease, opacity 220ms ease;
+    }
+    /* Layout modes: full (transit) vs split (hold) */
+    body.cinema-full .photos-detail-map   { flex: 1 1 100%; }
+    body.cinema-full .pd-preview          { flex: 0 0 0%; opacity: 0; pointer-events: none; }
+    body.cinema-split .photos-detail-map  { flex: 1 1 50%; }
+    body.cinema-split .pd-preview         { flex: 1 1 50%; opacity: 1; }
+    /* Hide all photo markers on the map in cinema — the moving dot suffices */
+    body.cinema-tour .photo-marker-wrap { display: none !important; }
+    /* Style the tour dot */
+    .tour-dot-marker { filter: drop-shadow(0 0 6px rgba(220,38,38,0.6)); }
+    @media (max-width: 900px) {
+      body.cinema-tour .photos-detail-mapwrap { flex-direction: column; }
+      body.cinema-full .photos-detail-map    { flex: 1 1 100vh; height: 100vh; }
+      body.cinema-full .pd-preview           { flex: 0 0 0vh; height: 0; }
+      body.cinema-split .photos-detail-map   { flex: 1 1 50vh; height: 50vh; }
+      body.cinema-split .pd-preview          { flex: 1 1 50vh; height: 50vh; }
     }
     /* Floating control pill visible only in cinema mode */
     .cinema-controls {
@@ -486,13 +511,6 @@
     }
     .cinema-controls .tl-btn:hover { background: rgba(255,255,255,0.1); }
 
-    @media (max-width: 900px) {
-      body.cinema-tour .photos-detail-mapwrap {
-        flex-direction: column;
-      }
-      body.cinema-tour .photos-detail-map { flex: 1 1 50vh; height: 50vh; }
-      body.cinema-tour .pd-preview { flex: 1 1 50vh; height: 50vh; }
-    }
     .photos-detail-legend { padding: 8px var(--sp-6); font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
     .pd-legend-hint { margin-left: auto; color: var(--text-mid); }
     .pd-legend-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--text-mid); vertical-align: middle; margin-right: 4px; }

@@ -8,14 +8,25 @@
 import { renderRoute } from '../map/route.js';
 import { ensurePhotoURL } from './heic.js';
 import { ensureVideoPoster } from './video.js';
-import { exportTourVideo, downloadBlob } from './export.js';
+import { exportTourVideo, downloadBlob, estimateExportDuration } from './export.js';
 
-let _tourTimer = null;
-let _tourIdx = 0;
 let _mapRef = null;
-let _tourPlaying = false;
-const PHOTO_HOLD_MS = 4000;
-const VIDEO_MAX_MS  = 20000;
+let _tourIdx = 0; // index into entries for the current photo (for tile highlight)
+let _tour = null;
+/**
+ * _tour when running: {
+ *   container, entries, route, segments, totalMs,
+ *   startedAt, pausedAtElapsed,   // elapsed ms captured on pause
+ *   rafId, running,
+ *   dotMarker,                    // L.circleMarker following the route
+ *   currentPhotoIdx,              // last photo shown in preview
+ *   currentSegKind,               // 'transit' | 'hold' — for cinema layout
+ * }
+ */
+const TRANSIT_TOTAL_MS = 15000;   // whole-route traversal takes 15s
+const PHOTO_HOLD_MS    = 4000;
+const VIDEO_MAX_MS     = 15000;   // cap for long videos in the cinema tour
+const VIDEO_TAIL_MS    = 400;
 
 /**
  * @param {HTMLElement} container
@@ -78,11 +89,22 @@ export async function renderPhotosDetail(container, activity, opts) {
         </div>
         <div class="pd-share-body">
           <p class="pd-share-hint">
-            Animates the whole workout: dot traces the full route, photos appear when they were taken. Camera starts wide, zooms in mid-workout, then pulls back for a wide finish. Output is a WebM that plays inline in Twitter/X, iMessage, Discord, WhatsApp, and Slack.
+            Animates the workout: dot traces the whole route, pausing at each photo. Renders a WebM that plays inline in Twitter/X, iMessage, Discord, WhatsApp, and Slack.
           </p>
           <div class="pd-share-row">
-            <label>Video length <span id="pd-share-len-val">25s</span></label>
-            <input type="range" id="pd-share-len" min="10" max="60" step="5" value="25" />
+            <label>Animation speed <span id="pd-share-speed-val">1.0×</span></label>
+            <input type="range" id="pd-share-speed" min="0.5" max="3" step="0.1" value="1" />
+          </div>
+          <div class="pd-share-row">
+            <label>Pause on photos <span id="pd-share-hold-val">3s</span></label>
+            <input type="range" id="pd-share-hold" min="1" max="8" step="1" value="3" />
+          </div>
+          <div class="pd-share-row">
+            <label>Max video play time <span id="pd-share-vid-val">8s</span></label>
+            <input type="range" id="pd-share-vid" min="3" max="30" step="1" value="8" />
+          </div>
+          <div class="pd-share-estimate">
+            Estimated length: <span id="pd-share-estimate-val">—</span>
           </div>
           <div class="pd-share-status" id="pd-share-status" hidden>
             <div class="pd-share-progress"><div id="pd-share-progress-fill"></div></div>
@@ -172,7 +194,7 @@ export async function renderPhotosDetail(container, activity, opts) {
   container.querySelector('#pd-cinema-prev')?.addEventListener('click', () => stepTour(container, entries, -1));
   container.querySelector('#pd-cinema-next')?.addEventListener('click', () => stepTour(container, entries, +1));
   container.querySelector('#pd-cinema-pause')?.addEventListener('click', () => toggleTour(container, entries));
-  container.querySelector('#pd-cinema-exit')?.addEventListener('click', () => toggleTour(container, entries));
+  container.querySelector('#pd-cinema-exit')?.addEventListener('click', () => stopTour(container));
 
   // Lightbox close (stop any playing video)
   const lb = container.querySelector('#pd-lightbox');
@@ -191,11 +213,25 @@ function wireShareModal(container, activity) {
   const closeBtn = container.querySelector('#pd-share-close');
   const cancelBtn = container.querySelector('#pd-share-cancel');
   const goBtn = container.querySelector('#pd-share-go');
-  const lenIn = container.querySelector('#pd-share-len');
-  const lenLbl = container.querySelector('#pd-share-len-val');
+  const speedIn = container.querySelector('#pd-share-speed');
+  const holdIn  = container.querySelector('#pd-share-hold');
+  const vidIn   = container.querySelector('#pd-share-vid');
+  const speedLbl = container.querySelector('#pd-share-speed-val');
+  const holdLbl  = container.querySelector('#pd-share-hold-val');
+  const vidLbl   = container.querySelector('#pd-share-vid-val');
+  const estimateVal = container.querySelector('#pd-share-estimate-val');
   const statusEl = container.querySelector('#pd-share-status');
   const statusLbl = container.querySelector('#pd-share-status-label');
   const progFill  = container.querySelector('#pd-share-progress-fill');
+
+  const updateEstimate = () => {
+    const secs = estimateExportDuration(activity, {
+      animSpeed: +speedIn.value,
+      photoPauseSec: +holdIn.value,
+      videoPlaySec: +vidIn.value,
+    });
+    estimateVal.textContent = `≈ ${secs}s`;
+  };
 
   const close = () => {
     if (goBtn.disabled) return; // don't close mid-render
@@ -205,12 +241,14 @@ function wireShareModal(container, activity) {
     progFill.style.width = '0%';
   };
 
-  openBtn.addEventListener('click', () => { modal.hidden = false; });
+  openBtn.addEventListener('click', () => { modal.hidden = false; updateEstimate(); });
   closeBtn.addEventListener('click', close);
   cancelBtn.addEventListener('click', close);
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
-  lenIn.addEventListener('input', () => { lenLbl.textContent = `${lenIn.value}s`; });
+  speedIn.addEventListener('input', () => { speedLbl.textContent = `${(+speedIn.value).toFixed(1)}×`; updateEstimate(); });
+  holdIn.addEventListener('input',  () => { holdLbl.textContent  = `${holdIn.value}s`; updateEstimate(); });
+  vidIn.addEventListener('input',   () => { vidLbl.textContent   = `${vidIn.value}s`; updateEstimate(); });
 
   goBtn.addEventListener('click', async () => {
     goBtn.disabled = true;
@@ -221,7 +259,9 @@ function wireShareModal(container, activity) {
       const blob = await exportTourVideo({
         activity,
         opts: {
-          totalDurationSec: +lenIn.value,
+          animSpeed: +speedIn.value,
+          photoPauseSec: +holdIn.value,
+          videoPlaySec: +vidIn.value,
           onProgress: (pct, label) => {
             progFill.style.width = `${pct}%`;
             if (label) statusLbl.textContent = `${label} ${pct}%`;
@@ -247,14 +287,12 @@ function activate(container, entries, idx, { openLightbox, fly }) {
   _tourIdx = idx;
   const { photo, playableURL, tile } = entries[idx];
 
-  // Highlight the active tile
+  // Highlight the active tile (visible when not in cinema)
   entries.forEach(e => e.tile?.classList.remove('active'));
   tile?.classList.add('active');
   tile?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
 
   if (fly && _mapRef) {
-    // Zoom 13 shows the surrounding streets/terrain so you can identify
-    // where the photo was taken, not just the exact GPS pin.
     try { _mapRef.flyTo([photo.lat, photo.lng], 13, { duration: 1.0 }); } catch {}
   }
   if (openLightbox) showLightbox(container, photo, playableURL);
@@ -297,85 +335,318 @@ function makeMarkerHTML(url, interpolated, isVideo) {
   return `<div class="${style}" style="${bg}">${badge}</div>`;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TOUR ENGINE — cinema mode with route traversal + moving dot
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build a segment timeline for the tour:
+ *   [ transit(route-start → photo1) ]
+ *   [ hold @ photo1 (photo shown in split preview) ]
+ *   [ transit(photo1 → photo2) ]
+ *   [ hold @ photo2 ]
+ *   ...
+ *   [ transit(photoN → route-end) ]
+ *
+ * Each segment stores fromRouteIdx / toRouteIdx (integer indices into the
+ * route array). The dot's on-screen position is always
+ * route[floor(idx)] → route[ceil(idx)] interpolated linearly, so it stays on
+ * the polyline that Leaflet already drew.
+ */
+function buildTourTimeline(route, entries) {
+  const N = route.length;
+  const fracs = entries.map(e => {
+    // Nearest route point index to photo's lat/lng
+    let bestIdx = 0, bestDist = Infinity;
+    for (let i = 0; i < N; i++) {
+      const dLat = route[i][0] - e.photo.lat;
+      const dLng = route[i][1] - e.photo.lng;
+      const d = dLat * dLat + dLng * dLng;
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    return bestIdx;
+  });
+  // Sort entries by their position along the route so the tour flows
+  // start → end (rather than by timestamp, which for out-and-back routes
+  // could zig-zag).
+  const order = entries.map((_, i) => i).sort((a, b) => fracs[a] - fracs[b]);
+
+  const segments = [];
+  let cursor = 0;
+  let prevIdx = 0;
+  for (const oi of order) {
+    const entry = entries[oi];
+    const targetIdx = fracs[oi];
+    if (targetIdx > prevIdx) {
+      const transitMs = TRANSIT_TOTAL_MS * ((targetIdx - prevIdx) / Math.max(1, N - 1));
+      segments.push({
+        kind: 'transit',
+        startMs: cursor, endMs: cursor + transitMs,
+        fromRouteIdx: prevIdx, toRouteIdx: targetIdx,
+      });
+      cursor += transitMs;
+    }
+    const holdMs = entry.isVideo
+      ? Math.min(VIDEO_MAX_MS, (entry._videoDurationMs || (entry.photo.isVideo ? 5000 : PHOTO_HOLD_MS))) + VIDEO_TAIL_MS
+      : PHOTO_HOLD_MS;
+    segments.push({
+      kind: 'hold',
+      startMs: cursor, endMs: cursor + holdMs,
+      atRouteIdx: targetIdx,
+      entryIdx: oi,
+      isVideo: entry.isVideo,
+    });
+    cursor += holdMs;
+    prevIdx = targetIdx;
+  }
+  // Final transit to end of route
+  if (prevIdx < N - 1) {
+    const transitMs = TRANSIT_TOTAL_MS * ((N - 1 - prevIdx) / Math.max(1, N - 1));
+    segments.push({
+      kind: 'transit',
+      startMs: cursor, endMs: cursor + transitMs,
+      fromRouteIdx: prevIdx, toRouteIdx: N - 1,
+    });
+    cursor += transitMs;
+  }
+  return { segments, totalMs: cursor };
+}
+
+/** Interpolate along the route by continuous index (0..N-1). */
+function routePosAtIdx(route, fIdx) {
+  const N = route.length;
+  if (N === 0) return null;
+  if (N === 1) return route[0];
+  const clamped = Math.max(0, Math.min(N - 1, fIdx));
+  const lo = Math.floor(clamped);
+  const hi = Math.min(N - 1, lo + 1);
+  const t = clamped - lo;
+  return [
+    route[lo][0] + (route[hi][0] - route[lo][0]) * t,
+    route[lo][1] + (route[hi][1] - route[lo][1]) * t,
+  ];
+}
+
+function findSegment(segments, ms) {
+  // Segments are in order; small linear scan is fine (< 100 typically).
+  for (const s of segments) if (ms >= s.startMs && ms < s.endMs) return s;
+  return segments[segments.length - 1] || null;
+}
+
 function stepTour(container, entries, delta) {
-  if (!entries.length) return;
-  const idx = (_tourIdx + delta + entries.length) % entries.length;
-  activate(container, entries, idx, { openLightbox: false, fly: true });
-  // If tour is playing, restart the auto-advance timer around the new item.
-  if (_tourPlaying) scheduleTourAdvance(container, entries);
+  if (!_tour || !entries.length) return;
+  // Determine current hold segment index (or nearest upcoming) and seek by delta.
+  const holds = _tour.segments.filter(s => s.kind === 'hold');
+  if (!holds.length) return;
+  let curHoldPos = holds.findIndex(h => h.entryIdx === _tour.currentPhotoIdx);
+  if (curHoldPos < 0) curHoldPos = 0;
+  const nextPos = (curHoldPos + delta + holds.length) % holds.length;
+  seekToHold(container, entries, holds[nextPos]);
+}
+
+function seekToHold(container, entries, holdSeg) {
+  if (!_tour) return;
+  _tour.pausedAtElapsed = holdSeg.startMs;
+  _tour.startedAt = performance.now() - _tour.pausedAtElapsed;
+  _tour.currentPhotoIdx = -1; // force preview refresh on next frame
+  if (!_tour.running) {
+    // Manually render one frame while paused so user sees the change
+    renderTourFrame(performance.now());
+  }
 }
 
 function toggleTour(container, entries) {
-  const btn = container.querySelector('#pd-play');
-  if (_tourPlaying) {
-    stopTour(container);
-    if (btn) btn.innerHTML = '&#9654; Play';
+  const playBtn = container.querySelector('#pd-play');
+  const cinemaPauseBtn = container.querySelector('#pd-cinema-pause');
+  if (_tour && _tour.running) {
+    pauseTour(container);
+    if (playBtn) playBtn.innerHTML = '&#9654; Play';
+    if (cinemaPauseBtn) cinemaPauseBtn.innerHTML = '&#9654;';
+    return;
+  }
+  if (_tour && !_tour.running) {
+    resumeTour();
+    if (playBtn) playBtn.innerHTML = '&#9646;&#9646; Pause';
+    if (cinemaPauseBtn) cinemaPauseBtn.innerHTML = '&#9646;&#9646;';
     return;
   }
   if (!entries.length) return;
-  _tourPlaying = true;
-  if (btn) btn.innerHTML = '&#9646;&#9646; Pause';
-  enterCinema(container);
-  showPreview(container, entries[_tourIdx]);
-  activate(container, entries, _tourIdx, { openLightbox: false, fly: true });
-  scheduleTourAdvance(container, entries);
+  startTour(container, entries);
+  if (playBtn) playBtn.innerHTML = '&#9646;&#9646; Pause';
+  if (cinemaPauseBtn) cinemaPauseBtn.innerHTML = '&#9646;&#9646;';
 }
 
-function enterCinema(container) {
-  document.body.classList.add('cinema-tour');
-  container.classList.add('cinema');
-  // Wait for the browser to apply the new layout before telling Leaflet to
-  // re-measure. Single RAF fires before layout; double RAF is after paint.
+function startTour(container, entries) {
+  const route = _tour_extractRoute();
+  if (!route.length) {
+    console.warn('[tour] no route data — cannot animate');
+    return;
+  }
+  const { segments, totalMs } = buildTourTimeline(route, entries);
+  _tour = {
+    container, entries, route, segments, totalMs,
+    startedAt: performance.now(),
+    pausedAtElapsed: 0,
+    rafId: null,
+    running: true,
+    dotMarker: null,
+    currentPhotoIdx: -1,
+    currentSegKind: null,
+  };
+  enterCinema(container, 'full');
+  // Create the moving dot on the map
+  if (_mapRef && route[0]) {
+    _tour.dotMarker = L.circleMarker(route[0], {
+      radius: 10,
+      color: '#ffffff',
+      weight: 3,
+      fillColor: '#dc2626',
+      fillOpacity: 1,
+      className: 'tour-dot-marker',
+    }).addTo(_mapRef);
+    // Fit map to the whole route so we can see it all
+    try {
+      const bounds = L.latLngBounds(route);
+      _mapRef.fitBounds(bounds, { padding: [40, 40], maxZoom: 15, animate: true });
+    } catch {}
+  }
+  _tour.rafId = requestAnimationFrame(tickTour);
+}
+
+function pauseTour() {
+  if (!_tour || !_tour.running) return;
+  _tour.pausedAtElapsed = performance.now() - _tour.startedAt;
+  _tour.running = false;
+  if (_tour.rafId) cancelAnimationFrame(_tour.rafId);
+  _tour.rafId = null;
+  // Pause any playing video in the preview
+  const v = _tour.container.querySelector('#pd-preview-media video');
+  if (v) try { v.pause(); } catch {}
+}
+
+function resumeTour() {
+  if (!_tour || _tour.running) return;
+  _tour.startedAt = performance.now() - _tour.pausedAtElapsed;
+  _tour.running = true;
+  // Resume any playing video
+  const v = _tour.container.querySelector('#pd-preview-media video');
+  if (v) try { v.play(); } catch {}
+  _tour.rafId = requestAnimationFrame(tickTour);
+}
+
+function tickTour(nowMs) {
+  if (!_tour || !_tour.running) return;
+  const t = nowMs - _tour.startedAt;
+  if (t >= _tour.totalMs) {
+    // End of tour — leave dot at end, keep cinema so user can restart
+    _tour.pausedAtElapsed = _tour.totalMs;
+    _tour.running = false;
+    const playBtn = _tour.container.querySelector('#pd-play');
+    if (playBtn) playBtn.innerHTML = '&#9654; Play';
+    const cinemaPauseBtn = _tour.container.querySelector('#pd-cinema-pause');
+    if (cinemaPauseBtn) cinemaPauseBtn.innerHTML = '&#9654;';
+    return;
+  }
+  renderTourFrame(nowMs);
+  _tour.rafId = requestAnimationFrame(tickTour);
+}
+
+function renderTourFrame(nowMs) {
+  if (!_tour) return;
+  const t = _tour.running ? (nowMs - _tour.startedAt) : _tour.pausedAtElapsed;
+  const seg = findSegment(_tour.segments, t);
+  if (!seg) return;
+
+  // Compute continuous route index
+  let fIdx;
+  if (seg.kind === 'transit') {
+    const local = (t - seg.startMs) / Math.max(1, seg.endMs - seg.startMs);
+    const eased = easeInOutCubic(Math.max(0, Math.min(1, local)));
+    fIdx = seg.fromRouteIdx + (seg.toRouteIdx - seg.fromRouteIdx) * eased;
+  } else {
+    fIdx = seg.atRouteIdx;
+  }
+  const pos = routePosAtIdx(_tour.route, fIdx);
+  if (_tour.dotMarker && pos) _tour.dotMarker.setLatLng(pos);
+
+  // Cinema layout follows segment kind: full during transit, split during hold
+  if (seg.kind !== _tour.currentSegKind) {
+    _tour.currentSegKind = seg.kind;
+    setCinemaMode(_tour.container, seg.kind === 'transit' ? 'full' : 'split');
+  }
+
+  if (seg.kind === 'hold') {
+    if (seg.entryIdx !== _tour.currentPhotoIdx) {
+      _tour.currentPhotoIdx = seg.entryIdx;
+      const entry = _tour.entries[seg.entryIdx];
+      showPreview(_tour.container, entry);
+      // Update tile highlight (visible when user later exits cinema)
+      activate(_tour.container, _tour.entries, seg.entryIdx, { openLightbox: false, fly: false });
+    }
+  }
+}
+
+/**
+ * Pull the current route out of Leaflet's rendered polylines. We don't hold
+ * a direct reference to it, but the last renderRoute() drew it into _mapRef.
+ * Fall back to reading from entries' source photos if needed.
+ */
+function _tour_extractRoute() {
+  const route = [];
+  if (_mapRef) {
+    _mapRef.eachLayer(layer => {
+      if (layer instanceof L.Polyline && !(layer instanceof L.Polygon)) {
+        const ll = layer.getLatLngs();
+        if (Array.isArray(ll) && ll.length > route.length) {
+          route.length = 0;
+          for (const p of ll) route.push([p.lat, p.lng]);
+        }
+      }
+    });
+  }
+  return route;
+}
+
+function setCinemaMode(container, mode) {
+  document.body.classList.toggle('cinema-full', mode === 'full');
+  document.body.classList.toggle('cinema-split', mode === 'split');
+  // Re-measure the map after the layout change
   requestAnimationFrame(() => requestAnimationFrame(() => {
     try { _mapRef?.invalidateSize(); } catch {}
   }));
 }
 
+function enterCinema(container, initialMode = 'full') {
+  document.body.classList.add('cinema-tour');
+  container.classList.add('cinema');
+  setCinemaMode(container, initialMode);
+}
+
 function exitCinema(container) {
-  document.body.classList.remove('cinema-tour');
+  document.body.classList.remove('cinema-tour', 'cinema-full', 'cinema-split');
   container.classList.remove('cinema');
   requestAnimationFrame(() => requestAnimationFrame(() => {
     try { _mapRef?.invalidateSize(); } catch {}
   }));
 }
 
-function scheduleTourAdvance(container, entries) {
-  clearTimeout(_tourTimer);
-  const entry = entries[_tourIdx];
-  const isVideo = !!entry.photo.isVideo;
-  const advance = () => {
-    if (!_tourPlaying) return;
-    const nextIdx = (_tourIdx + 1) % entries.length;
-    activate(container, entries, nextIdx, { openLightbox: false, fly: true });
-    showPreview(container, entries[nextIdx]);
-    scheduleTourAdvance(container, entries);
-  };
-  if (isVideo) {
-    // Wait for the video element in the preview to end (capped by VIDEO_MAX_MS).
-    const videoEl = container.querySelector('#pd-preview-media video');
-    if (videoEl) {
-      const onEnd = () => { videoEl.removeEventListener('ended', onEnd); advance(); };
-      videoEl.addEventListener('ended', onEnd);
-      _tourTimer = setTimeout(() => {
-        videoEl.removeEventListener('ended', onEnd);
-        advance();
-      }, VIDEO_MAX_MS);
-    } else {
-      _tourTimer = setTimeout(advance, PHOTO_HOLD_MS);
-    }
-  } else {
-    _tourTimer = setTimeout(advance, PHOTO_HOLD_MS);
-  }
-}
-
 function stopTour(container) {
-  clearTimeout(_tourTimer);
-  _tourTimer = null;
-  _tourPlaying = false;
+  if (!_tour) return;
+  if (_tour.rafId) cancelAnimationFrame(_tour.rafId);
+  if (_tour.dotMarker && _mapRef) {
+    try { _mapRef.removeLayer(_tour.dotMarker); } catch {}
+  }
+  _tour = null;
   if (container) {
     hidePreview(container);
     exitCinema(container);
+    const playBtn = container.querySelector('#pd-play');
+    if (playBtn) playBtn.innerHTML = '&#9654; Play';
   }
+}
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
 function showPreview(container, entry) {

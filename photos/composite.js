@@ -184,6 +184,11 @@ export function drawFrame(ctx, spec) {
   if (camera && tileSet) camera.drawBasemap(ctx, tileSet);
 
   // Route + trail + dot (clipped to mapArea)
+  //
+  // Alignment: the dot is drawn at exactly the last vertex of the trail
+  // polyline, so it always sits ON the line. Caller passes `dotLatLng` as
+  // the interpolated position between route[i] and route[i+1]; we use the
+  // same interpolation to place the trail's terminating vertex.
   if (route.length > 1 && camera) {
     ctx.save();
     ctx.beginPath();
@@ -203,19 +208,28 @@ export function drawFrame(ctx, spec) {
     }
     ctx.stroke();
 
-    // Progressive trail
-    const cutIdx = Math.max(1, Math.floor(route.length * clamp01(progress)));
+    // Progressive trail: use continuous route index (fIdx) when provided.
+    // Draw whole vertices up to floor(fIdx), then a terminal segment to
+    // dotLatLng — so the trail's end and the dot are the SAME point.
+    const fIdx = (spec.fIdx !== undefined)
+      ? spec.fIdx
+      : (route.length - 1) * clamp01(progress);
+    const lastWhole = Math.max(0, Math.floor(fIdx));
     ctx.strokeStyle = accent;
     ctx.lineWidth = 5;
     ctx.beginPath();
-    for (let i = 0; i < cutIdx; i++) {
+    for (let i = 0; i <= lastWhole; i++) {
       const [x, y] = camera.project(route[i]);
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
+    if (dotLatLng) {
+      const [dx, dy] = camera.project(dotLatLng);
+      ctx.lineTo(dx, dy);
+    }
     ctx.stroke();
 
-    // Current-position dot with halo
+    // Current-position dot with halo — drawn on top of the trail's endpoint
     if (dotLatLng) {
       const [dx, dy] = camera.project(dotLatLng);
       const grad = ctx.createRadialGradient(dx, dy, 2, dx, dy, 28);
