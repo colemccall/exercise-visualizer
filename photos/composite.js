@@ -169,26 +169,84 @@ export function makeCamera(center, zoom, viewport) {
 }
 
 /**
- * Draw a large centered text overlay — used during the cinematic intro to
- * name the location ("Cincinnati, Ohio"). Fades in and out based on alpha.
+ * Draw a self-contained title card — used during the cinematic intro.
+ * No tiles, no network — just a dark background with the trip name and a
+ * subtitle. Fades in fast, holds, fades out.
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {{
+ *   size: {w:number,h:number},
+ *   title: string,
+ *   subtitle?: string,
+ *   alpha: number,             // 0..1
+ *   accent?: string,
+ * }} spec
  */
-export function drawIntroOverlay(ctx, { size, text, alpha }) {
-  if (!text || alpha <= 0) return;
+export function drawTitleCard(ctx, { size, title, subtitle, alpha, accent = '#dc2626' }) {
+  // Solid backdrop (always drawn so the intro is never blank while text fades)
   ctx.save();
+  ctx.fillStyle = '#0f0f13';
+  ctx.fillRect(0, 0, size.w, size.h);
+
+  // Subtle vignette so the eye lands center-frame
+  const grad = ctx.createRadialGradient(size.w / 2, size.h / 2, size.h * 0.1, size.w / 2, size.h / 2, size.h * 0.6);
+  grad.addColorStop(0, 'rgba(30,30,40,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size.w, size.h);
+
+  // Accent bar as a small design element (always visible during intro)
+  ctx.fillStyle = accent;
+  const barW = 60, barH = 4;
+  ctx.fillRect((size.w - barW) / 2, size.h * 0.32, barW, barH);
+
+  // Text fades independently from the backdrop
   ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  // Drop shadow for readability over any basemap
-  ctx.shadowColor = 'rgba(0,0,0,0.7)';
-  ctx.shadowBlur = 12;
+  ctx.shadowColor = 'rgba(0,0,0,0.6)';
+  ctx.shadowBlur = 10;
   ctx.shadowOffsetY = 2;
+
+  // Title — wrap-aware. Very long names get split; short names use one line.
   ctx.fillStyle = '#ffffff';
-  ctx.font = '700 52px "Barlow Condensed", "Barlow", Impact, system-ui, sans-serif';
-  // Track-out (spaced) uppercase for a poster feel
-  const words = text.toUpperCase().split(/\s+/);
-  const y = size.h * 0.4;
-  ctx.fillText(words.join('  '), size.w / 2, y);
+  const titleFont = 'bold 64px "Barlow Condensed", "Barlow", Impact, system-ui, sans-serif';
+  const lines = wrapText(ctx, (title || '').toUpperCase(), titleFont, size.w - 100);
+  ctx.font = titleFont;
+  const lineH = 72;
+  const cy = size.h * 0.44;
+  const startY = cy - ((lines.length - 1) * lineH) / 2;
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], size.w / 2, startY + i * lineH);
+  }
+
+  if (subtitle) {
+    ctx.font = '400 20px Inter, system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillText(subtitle, size.w / 2, startY + lines.length * lineH + 8);
+  }
+
   ctx.restore();
+}
+
+function wrapText(ctx, text, font, maxWidth) {
+  ctx.save();
+  ctx.font = font;
+  const words = text.split(/\s+/);
+  const lines = [];
+  let cur = '';
+  for (const w of words) {
+    const attempt = cur ? cur + ' ' + w : w;
+    if (ctx.measureText(attempt).width > maxWidth && cur) {
+      lines.push(cur);
+      cur = w;
+    } else {
+      cur = attempt;
+    }
+  }
+  if (cur) lines.push(cur);
+  ctx.restore();
+  return lines.length ? lines : [''];
 }
 
 /**
@@ -313,8 +371,10 @@ export function drawFrame(ctx, spec) {
       mw = media.videoWidth || mediaArea.w;
       mh = media.videoHeight || mediaArea.h;
     } else {
-      mw = media.naturalWidth || mediaArea.w;
-      mh = media.naturalHeight || mediaArea.h;
+      // Image, ImageBitmap, or HTMLCanvasElement — all expose width/height;
+      // Image also exposes naturalWidth (preferred if present).
+      mw = media.naturalWidth || media.width || mediaArea.w;
+      mh = media.naturalHeight || media.height || mediaArea.h;
     }
     const scale = Math.min(mediaArea.w / mw, mediaArea.h / mh);
     const drawW = mw * scale;

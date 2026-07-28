@@ -106,6 +106,13 @@ export async function renderPhotosDetail(container, activity, opts) {
               <option value="follow">Follow the route — zoomed in, camera tracks the dot</option>
             </select>
           </div>
+          <div class="pd-share-row">
+            <label>Output format</label>
+            <select id="pd-share-format" class="pd-share-select">
+              <option value="webm" selected>WebM — fast (works in most players + social apps)</option>
+              <option value="mp4">MP4 — slower first time (~25 MB one-time encoder download; needed for Instagram)</option>
+            </select>
+          </div>
           <div class="pd-share-row pd-share-check-row">
             <label class="pd-share-check">
               <input type="checkbox" id="pd-share-intro" checked />
@@ -240,6 +247,7 @@ function wireShareModal(container, activity) {
   const goBtn = container.querySelector('#pd-share-go');
   const titleIn = container.querySelector('#pd-share-title');
   const modeIn  = container.querySelector('#pd-share-mode');
+  const formatIn = container.querySelector('#pd-share-format');
   const introIn = container.querySelector('#pd-share-intro');
   const introLenIn = container.querySelector('#pd-share-introlen');
   const introLenLbl = container.querySelector('#pd-share-introlen-val');
@@ -303,6 +311,7 @@ function wireShareModal(container, activity) {
         opts: {
           title: titleIn.value,
           mode: modeIn.value,
+          format: formatIn.value,
           intro: introIn.checked,
           introSec: +introLenIn.value,
           animSpeed: +speedIn.value,

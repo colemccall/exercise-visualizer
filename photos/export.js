@@ -21,37 +21,8 @@
  *   videoPlaySec      (3..30s, default 8) — cap on video hold; actual is min(dur, cap)
  */
 
-import { drawFrame, makeCamera, loadBasemapTiles, computeBBox, bestZoomForBBox, defaultSize, drawIntroOverlay } from './composite.js';
+import { drawFrame, makeCamera, loadBasemapTiles, computeBBox, bestZoomForBBox, defaultSize, drawTitleCard } from './composite.js';
 import { ensurePhotoURL } from './heic.js';
-
-const INTRO_WIDE_ZOOM = 5; // state/country scale
-
-/**
- * Reverse-geocode the route's center to a display label like
- * "Cincinnati, Ohio". Cached on the activity so re-exporting doesn't repeat
- * the network call. Returns null on failure — caller should degrade gracefully.
- */
-async function reverseGeocodeCenter(activity, [lat, lng]) {
-  if (activity._geocode) return activity._geocode;
-  const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=8&accept-language=en`;
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const j = await res.json();
-    const a = j.address || {};
-    const place = a.city || a.town || a.village || a.hamlet || a.county;
-    const region = a.state || a.state_district || a.region;
-    const country = a.country;
-    const label = [place, region].filter(Boolean).join(', ') || country || null;
-    activity._geocode = label;
-    return label;
-  } catch {
-    return null;
-  }
-}
 
 const FPS = 30;
 
@@ -116,6 +87,7 @@ export async function exportTourVideo({ activity, opts = {} }) {
   const intro        = opts.intro !== false;    // default on
   const introSec     = opts.introSec ?? 3;
   const userTitle    = (opts.title || '').trim() || null;
+  const format       = opts.format || 'webm';   // 'webm' | 'mp4'
   const onProgress = opts.onProgress || (() => {});
 
   onProgress(0, 'Preparing…');
@@ -173,7 +145,15 @@ export async function exportTourVideo({ activity, opts = {} }) {
         });
         if (!loaded) continue; // skip unreadable videos rather than embedding a black frame
       } else {
-        element = await loadImage(url);
+        // Decode + pre-scale the photo to the target render size using
+        // createImageBitmap. This does two important things:
+        //   1. Guarantees GPU texture upload happens NOW (during preload)
+        //      rather than the first time drawImage runs at frame time —
+        //      which is what was causing the lag spike at each photo hold.
+        //   2. Downscales huge iPhone photos (4k+ wide) to ~1280px so
+        //      each drawImage call moves 10x less data.
+        const rawImg = await loadImage(url);
+        element = await createScaledBitmap(rawImg, 1280);
       }
       preloaded.push({
         photo: p,
@@ -263,30 +243,27 @@ export async function exportTourVideo({ activity, opts = {} }) {
   onProgress(22, 'Loading map tiles…');
   const tileSets = [];
   const mainTiles = await loadBasemapTiles(bbox, tileZoom, (frac) => {
-    onProgress(22 + Math.round(frac * 12), 'Loading map tiles…');
+    onProgress(22 + Math.round(frac * 18), 'Loading map tiles…');
   });
   tileSets.push(mainTiles);
-  let introLabel = null;
-  if (intro) {
-    onProgress(34, 'Loading intro tiles…');
-    const wideTiles = await loadBasemapTiles(bbox, INTRO_WIDE_ZOOM, () => {});
-    tileSets.push(wideTiles);
-    onProgress(37, 'Finding location…');
-    introLabel = await reverseGeocodeCenter(activity, routeCenter);
-  }
   onProgress(40, 'Recording…');
 
-  // Prepend intro segment if enabled
+  // Prepend intro segment if enabled. Intro is now a self-contained title
+  // card (dark background + trip name + subtitle) — no tiles, no network,
+  // always guaranteed to render, and the user's own trip name is front
+  // and center instead of a fuzzy geocoded location.
   if (intro) {
     const introMs = introSec * 1000;
-    // Push all existing segments back by introMs, then prepend intro
+    const cardTitle = userTitle || activity.name || `${activity.type} · ${formatShortDate(activity.date)}`;
+    const distStr = routeKm >= 1 ? `${routeKm.toFixed(1)} km` : `${Math.round(routeKm * 1000)} m`;
+    const durStr = activity.duration_s > 0 ? formatDuration(activity.duration_s) : '';
+    const cardSubtitle = [formatShortDate(activity.date), distStr, durStr].filter(Boolean).join(' · ');
     for (const s of segments) { s.startMs += introMs; s.endMs += introMs; }
     segments.unshift({
       kind: 'intro',
       startMs: 0, endMs: introMs,
-      wideZoom: INTRO_WIDE_ZOOM,
-      mainZoom: overviewZoom,
-      label: introLabel,
+      cardTitle,
+      cardSubtitle,
     });
   }
   const finalTotalMs = segments.length ? segments[segments.length - 1].endMs : totalMs;
@@ -317,28 +294,21 @@ export async function exportTourVideo({ activity, opts = {} }) {
       }
       const seg = findSegment(segments, t);
 
-      // Intro segment: wide-zoom overview with a "City, State" text overlay.
-      // Zoom eases from INTRO_WIDE_ZOOM into the main overview zoom; the
-      // route line only becomes readable near the end of the intro when
-      // the camera has closed in enough.
+      // Intro segment: dark title card with the trip name + a subtitle.
+      // Text fades in, holds, then fades out; the last ~200ms blends back
+      // to nothing before the main animation snaps in.
       if (seg.kind === 'intro') {
         const local = (t - seg.startMs) / Math.max(1, seg.endMs - seg.startMs);
-        const zoom = seg.wideZoom + (seg.mainZoom - seg.wideZoom) * easeOutCubic(local);
-        const camera = makeCamera(routeCenter, zoom, mapViewport);
-        drawFrame(ctx, {
-          size, camera, tileSet: tileSets, route,
-          fIdx: 0,
-          dotLatLng: null,        // dot hidden during intro
-          media: null,
-          caption: '',
-          title: userTitle || `${activity.type} · ${formatShortDate(activity.date)}`,
-          themeAccent: '#dc2626',
-        });
-        // Text overlay fades in fast, holds, fades out at the end.
-        const alpha = local < 0.15 ? (local / 0.15)
-                     : local > 0.8 ? (1 - (local - 0.8) / 0.2)
+        const alpha = local < 0.2 ? (local / 0.2)
+                     : local > 0.85 ? Math.max(0, 1 - (local - 0.85) / 0.15)
                      : 1;
-        drawIntroOverlay(ctx, { size, text: seg.label, alpha });
+        drawTitleCard(ctx, {
+          size,
+          title: seg.cardTitle,
+          subtitle: seg.cardSubtitle,
+          alpha,
+          accent: '#dc2626',
+        });
         onProgress(40 + Math.round((t / finalTotalMs) * 55), 'Recording…');
         return requestAnimationFrame(tick);
       }
@@ -398,11 +368,27 @@ export async function exportTourVideo({ activity, opts = {} }) {
   recorder.stop();
   await recordingDone;
   stream.getTracks().forEach(t => t.stop());
-  onProgress(98, 'Finalizing…');
+  onProgress(96, 'Finalizing…');
   await new Promise(r => setTimeout(r, 150));
-  const blob = new Blob(chunks, { type: mimeType });
-  // Clean up any DOM-attached video elements
+  let blob = new Blob(chunks, { type: mimeType });
   try { stagingRoot.remove(); } catch {}
+
+  // Optional MP4 transcode. ffmpeg.wasm is lazy-loaded here — only pulled
+  // in when the user explicitly picked MP4 in the export modal.
+  if (format === 'mp4' && !blob.type.includes('mp4')) {
+    onProgress(96, 'Preparing MP4 encoder…');
+    try {
+      const { webmToMp4 } = await import('./mp4.js');
+      blob = await webmToMp4(blob, (pct, label) => {
+        // Map the ffmpeg 0..100 into our 96..100 remaining band
+        onProgress(96 + Math.round(pct * 0.04), label || 'Transcoding…');
+      });
+    } catch (err) {
+      console.warn('[export] MP4 transcode failed; delivering WebM instead', err);
+      // fall through — user still gets the WebM
+    }
+  }
+
   onProgress(100, 'Done');
   return blob;
 }
@@ -438,6 +424,38 @@ function loadImage(url) {
     img.onerror = () => reject(new Error('image load failed'));
     img.src = url;
   });
+}
+
+/**
+ * Decode + downscale a source image to `targetW` pixels wide (preserving
+ * aspect). Returns an ImageBitmap when available (GPU-ready, fastest for
+ * drawImage), falling back to a scaled canvas otherwise. Warming the
+ * bitmap here means the first drawImage at frame time is a cheap texture
+ * lookup, not a decode + upload — which is what caused per-photo lag.
+ */
+async function createScaledBitmap(sourceImg, targetW) {
+  const srcW = sourceImg.naturalWidth || sourceImg.width || targetW;
+  const srcH = sourceImg.naturalHeight || sourceImg.height || targetW;
+  const scale = Math.min(1, targetW / srcW);
+  const w = Math.round(srcW * scale);
+  const h = Math.round(srcH * scale);
+
+  if (typeof createImageBitmap === 'function') {
+    try {
+      return await createImageBitmap(sourceImg, {
+        resizeWidth: w,
+        resizeHeight: h,
+        resizeQuality: 'high',
+      });
+    } catch { /* fall through to canvas fallback */ }
+  }
+  // Canvas fallback (Safari sometimes rejects the resize options above)
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(sourceImg, 0, 0, w, h);
+  return canvas; // drawImage accepts HTMLCanvasElement too
 }
 
 function nearestRouteIdx(route, latLng) {
@@ -490,6 +508,13 @@ function easeInOutCubic(t) {
 
 function easeOutCubic(t) {
   return 1 - Math.pow(1 - t, 3);
+}
+
+function formatDuration(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 function formatShortDate(d) {
