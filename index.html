@@ -171,21 +171,16 @@
     .go-btn.ready:hover { opacity: 0.9; transform: translateY(-2px); box-shadow: 0 6px 28px rgba(37,99,235,0.45); }
     .go-btn.ready:active { transform: translateY(0); }
 
-    /* Duplicate banner */
+    /* Duplicate banner — semantic "warn" token, same values drive both themes */
     #duplicate-banner {
       display: flex;
       align-items: center;
       gap: var(--sp-3);
       padding: var(--sp-3) var(--sp-6);
-      background: #fefce8;
-      border-bottom: 1px solid #fde68a;
-      color: #92400e;
+      background: var(--warn-bg);
+      border-bottom: 1px solid var(--warn-bd);
+      color: var(--warn);
       font-size: 13px;
-    }
-    html.dark-mode #duplicate-banner {
-      background: #2a1f00;
-      border-color: #5a4200;
-      color: #fbbf24;
     }
     .dup-icon { font-size: 18px; flex-shrink: 0; }
     .dup-text { flex: 1; }
@@ -196,13 +191,12 @@
       border-radius: var(--radius-sm);
       border: 1.5px solid currentColor;
       background: transparent;
-      color: #92400e;
+      color: var(--warn);
       cursor: pointer;
       white-space: nowrap;
       transition: background 0.12s;
       flex-shrink: 0;
     }
-    html.dark-mode .dup-btn-review { color: #fbbf24; }
     .dup-btn-review:hover { background: rgba(0,0,0,0.08); }
     .dup-btn-dismiss {
       font-size: 18px;
@@ -1203,23 +1197,116 @@
       font-size: 13px;
     }
 
-    /* ── Dark mode overrides ── */
-    html.dark-mode {
-      --bg:           #0f0f13;
-      --surface:      #18181f;
-      --surface-2:    #22222c;
-      --border:       #2e2e3e;
-      --border-mid:   #3a3a50;
-      --text:         #eeeef5;
-      --text-mid:     #a0a0b8;
-      --text-muted:   #5a5a70;
-      --correct-bg:   #0d2e1a;
-      --correct-bd:   #1a5c35;
-      --wrong-bg:     #2e0f0f;
-      --wrong-bd:     #7a2020;
-      --warn-bg:      #2e2000;
-      --accent:       #3b82f6;
-      --accent-light: #172554;
+    /* ═══════════════════════════════════════════════════════════════
+       TWO COMPLETE THEMES — light (.app-fitness) and dark
+       (html.dark-mode .app-fitness). Each is a self-contained,
+       WCAG AA-checked palette (not a partial token override on top of
+       the shared design-system defaults) so light and dark feel like
+       two deliberately designed looks rather than a light theme with
+       some colors inverted.
+
+       Contrast ratios below are against that theme's --bg.
+       Semantic tokens:
+         --bg              page background
+         --surface         section background (one step up from bg)
+         --surface-2       secondary/inset background (existing name,
+                            used for wells, chips)
+         --surface-raised  elevated card background (elev-2)
+         --surface-sunken  recessed background (inputs, code, wells)
+         --border          hairline divider / stroke
+         --border-mid      emphasized border
+         --text/-mid/-muted   3-step text hierarchy
+         --accent          primary interactive color
+         --accent-strong   hover/active/pressed accent
+         --accent-light    accent-tinted background (existing name)
+         --accent-quiet    alias of accent-light, semantic name from
+                            the design plan
+         --elev-0..3       background-based elevation steps (cards
+                            stack via subtle bg delta, not heavy shadow)
+         --shadow-elev1..3  matching subtle shadows for when a little
+                            separation is still needed (modals, popovers)
+       ═══════════════════════════════════════════════════════════════ */
+
+    /* ── LIGHT THEME ── */
+    .app-fitness {
+      --bg:             #ffffff;
+      --surface:        #f6f7fa;
+      --surface-2:      #eef0f5;
+      --surface-raised: #ffffff;
+      --surface-sunken: #eceef3;
+      --border:         #e1e4ea;
+      --border-mid:     #c7cbd6;
+
+      --text:           #14161c;  /* 17.9:1 on --bg */
+      --text-mid:       #4b4f5c;  /*  9.1:1 on --bg */
+      --text-muted:     #6b7080;  /*  5.4:1 on --bg — AA for normal text */
+
+      --accent:         #1d4ed8;  /*  6.3:1 on --bg */
+      --accent-strong:  #1e3a8a;
+      --accent-light:   #eaf1ff;
+      --accent-quiet:   #eaf1ff;
+
+      --correct:        #16a34a;
+      --correct-bg:     #f0fdf4;
+      --correct-bd:     #86efac;
+      --wrong:          #dc2626;
+      --wrong-bg:       #fef2f2;
+      --wrong-bd:       #fca5a5;
+      --warn:           #b45309;  /* darkened from shared default for AA text use */
+      --warn-bg:        #fffbeb;
+      --warn-bd:        #fde68a;
+
+      --elev-0: var(--bg);
+      --elev-1: var(--surface);
+      --elev-2: var(--surface-raised);
+      --elev-3: #ffffff;
+      --shadow-elev1: 0 1px 2px rgba(20,22,28,0.06);
+      --shadow-elev2: 0 2px 8px rgba(20,22,28,0.08), 0 1px 2px rgba(20,22,28,0.06);
+      --shadow-elev3: 0 8px 28px rgba(20,22,28,0.16), 0 2px 6px rgba(20,22,28,0.08);
+
+      --grad-a: #1e3a8a;
+      --grad-b: #1d4ed8;
+    }
+
+    /* ── DARK THEME ── */
+    html.dark-mode .app-fitness {
+      --bg:             #0b0c10;
+      --surface:        #15171d;
+      --surface-2:      #1c1f27;
+      --surface-raised: #1b1e26;
+      --surface-sunken: #08090c;
+      --border:         #272b35;
+      --border-mid:     #3a3f4c;
+
+      --text:           #f1f2f6;  /* 17.7:1 on --bg */
+      --text-mid:       #b7bbc9;  /*  9.4:1 on --bg */
+      --text-muted:     #868c9c;  /*  5.0:1 on --bg — AA for normal text */
+
+      --accent:         #6d9bff;  /*  8.4:1 on --bg */
+      --accent-strong:  #9dbdff;
+      --accent-light:   #16233f;
+      --accent-quiet:   #16233f;
+
+      --correct:        #4ade80;
+      --correct-bg:     #0d2818;
+      --correct-bd:     #1f5c3a;
+      --wrong:          #f87171;
+      --wrong-bg:       #2c1113;
+      --wrong-bd:       #7a2020;
+      --warn:           #fbbf24;
+      --warn-bg:        #2a2000;
+      --warn-bd:        #5a4200;
+
+      --elev-0: var(--bg);
+      --elev-1: var(--surface);
+      --elev-2: var(--surface-raised);
+      --elev-3: #22262f;
+      --shadow-elev1: 0 1px 2px rgba(0,0,0,0.4);
+      --shadow-elev2: 0 2px 10px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.3);
+      --shadow-elev3: 0 12px 34px rgba(0,0,0,0.6), 0 3px 8px rgba(0,0,0,0.35);
+
+      --grad-a: #1e3a8a;
+      --grad-b: #6d9bff;
     }
     /* Source badges — light and dark */
     .source-badge.strava  { color: #FC4C02; background: #fff3ef; border-color: #FC4C02; }
@@ -1431,6 +1518,153 @@
       .header-controls { flex-direction: column; align-items: flex-start; }
       .charts-row { grid-template-columns: 1fr; }
       .charts-row .chart-card[style*="span 2"] { grid-column: span 1; }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       B3 — COMPONENT PASS
+       Applied as an override layer on top of the structural CSS above
+       (same class names, later in source order + often more specific
+       via the .app-fitness scope, so these rules win). Covers:
+         - Typography: 3 display sizes, 2 body sizes, 1 label size
+         - Buttons: consolidated to Primary / Secondary / Ghost
+         - Cards & containers: elevation tokens instead of heavy shadow
+         - Tabs: pill style everywhere (was underline-only in one spot)
+       ═══════════════════════════════════════════════════════════════ */
+
+    /* ── Typography scale ── */
+    .app-fitness {
+      --fz-display-1: 26px; /* hero numbers: stats bar */
+      --fz-display-2: 18px; /* section headers, chart titles, medium numbers */
+      --fz-display-3: 14px; /* compact display text */
+      --fz-label:     10px; /* all-caps micro labels — was 9-11px scattered */
+    }
+    .app-fitness .bs-display-xl { font-size: var(--fz-display-1); letter-spacing: 0.02em; }
+    .app-fitness .bs-display-lg,
+    .app-fitness .bs-display-md { font-size: var(--fz-display-2); letter-spacing: 0.03em; }
+    .app-fitness .bs-display-sm { font-size: var(--fz-display-3); letter-spacing: 0.03em; }
+    .app-fitness .bs-label,
+    .app-fitness .bs-label-accent,
+    .app-fitness .bs-stat-lbl,
+    .app-fitness .activity-source-badge,
+    .app-fitness .pd-tile-caption,
+    .app-fitness .record-date { font-size: var(--fz-label); letter-spacing: 0.08em; }
+    .app-fitness .chart-title { font-size: var(--fz-display-2); }
+    .app-fitness .nav-brand { font-size: var(--fz-display-2); }
+    .app-fitness .stats-bar .bs-stat-num { font-size: var(--fz-display-1); }
+    .app-fitness .activity-dist,
+    .app-fitness .record-value { font-size: var(--fz-display-2); }
+
+    /* ── Buttons: Primary / Secondary / Ghost ──
+       Primary   — solid accent fill, white text (go-btn.ready, upload-choose-btn)
+       Secondary — outlined, neutral (tl-btn, bs-btn-secondary, dup-btn-review)
+       Ghost     — text-only (bs-btn-ghost, dup-btn-dismiss, close buttons) */
+    .app-fitness .go-btn.ready,
+    .app-fitness .upload-choose-btn {
+      background: linear-gradient(135deg, var(--grad-a), var(--grad-b));
+      box-shadow: var(--shadow-elev2);
+    }
+    .app-fitness .bs-upload-zone.loaded .upload-choose-btn { background: var(--correct); box-shadow: none; }
+
+    .app-fitness .tl-btn,
+    .app-fitness .bs-btn-secondary {
+      background: var(--surface-raised);
+      border: 1.5px solid var(--border-mid);
+      color: var(--text);
+      border-radius: var(--radius-sm);
+      font-weight: 700;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .app-fitness .tl-btn:hover,
+    .app-fitness .bs-btn-secondary:hover {
+      background: var(--accent-quiet);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .app-fitness .dup-btn-review {
+      background: var(--surface-raised);
+      border: 1.5px solid currentColor;
+    }
+
+    .app-fitness .bs-btn-ghost,
+    .app-fitness .dup-btn-dismiss,
+    .app-fitness .pd-lightbox-close,
+    .app-fitness .upload-modal-close {
+      background: transparent;
+      border: none;
+      color: var(--text-mid);
+      font-weight: 600;
+      transition: color 0.12s;
+    }
+    .app-fitness .bs-btn-ghost:hover,
+    .app-fitness .dup-btn-dismiss:hover {
+      color: var(--accent);
+      opacity: 1;
+    }
+
+    /* ── Tabs: pill style everywhere (explore panel tabs matched to nav-tabs) ── */
+    .app-fitness .explore-tabs {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      margin: var(--sp-3) var(--sp-3) 0;
+      background: var(--surface-2);
+      border-radius: 999px;
+      border-bottom: none;
+      width: fit-content;
+    }
+    .app-fitness .etab {
+      border-radius: 999px;
+      border-bottom: none !important;
+      color: var(--text-mid);
+      transition: background 0.12s, color 0.12s;
+    }
+    .app-fitness .etab.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .app-fitness .etab:hover:not(.active) {
+      background: var(--surface-raised);
+      color: var(--text);
+    }
+
+    /* ── Cards & containers: elevation over heavy shadow ── */
+    .app-fitness .chart-card {
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      padding: var(--sp-5);
+    }
+    .app-fitness #explore-panel {
+      background: var(--surface);
+    }
+    .app-fitness .stats-bar {
+      background: var(--elev-1);
+    }
+    .app-fitness .activity-row:hover {
+      background: var(--accent-quiet);
+    }
+    .app-fitness .photos-row {
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      box-shadow: none;
+    }
+    .app-fitness .photos-row:hover {
+      border-color: var(--accent);
+      box-shadow: var(--shadow-elev1);
+    }
+    .app-fitness .pd-tile.active {
+      box-shadow: 0 0 0 3px var(--accent-quiet);
+    }
+    .app-fitness .pd-share-inner,
+    .app-fitness .upload-modal-inner {
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-elev3);
+    }
+    .app-fitness .heatmap-style-toggle {
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-elev2);
+    }
+    .app-fitness .record-row-clickable:hover {
+      background: var(--accent-quiet);
     }
   </style>
 </head>

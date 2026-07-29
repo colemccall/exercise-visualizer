@@ -4,14 +4,8 @@
  * Supports light/dark basemap switching.
  */
 
-export const TYPE_COLORS = {
-  Run:   '#FF6B6B',
-  Ride:  '#4A90D9',
-  Walk:  '#5CB85C',
-  Hike:  '#F0AD4E',
-  Swim:  '#5BC0DE',
-  Other: '#aaaaaa',
-};
+import { TYPE_COLORS } from '../design-system/activity-colors.js';
+export { TYPE_COLORS };
 
 let _routeLayerGroup = null;
 let _map = null;

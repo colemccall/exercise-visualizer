@@ -4,14 +4,7 @@
  * Much easier to read than a daily scatter.
  */
 
-const ACTIVITY_COLORS = {
-  Run:   '#FF6B6B',
-  Ride:  '#4A90D9',
-  Walk:  '#5CB85C',
-  Hike:  '#F0AD4E',
-  Swim:  '#5BC0DE',
-  Other: '#aaaaaa',
-};
+import { TYPE_COLORS as ACTIVITY_COLORS } from '../design-system/activity-colors.js';
 const TYPES = ['Run', 'Ride', 'Walk', 'Hike', 'Swim', 'Other'];
 
 export function renderDistanceChart(activities, container, units = 'metric') {

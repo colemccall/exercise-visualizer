@@ -4,14 +4,7 @@
  * Shows 52 weeks × 7 days, intensity = activity count per day.
  */
 
-const TYPE_COLORS = {
-  Run:   '#FF6B6B',
-  Ride:  '#4A90D9',
-  Walk:  '#5CB85C',
-  Hike:  '#F0AD4E',
-  Swim:  '#5BC0DE',
-  Other: '#aaaaaa',
-};
+import { TYPE_COLORS } from '../design-system/activity-colors.js';
 
 export function renderWeeklyChart(activities, container) {
   container.innerHTML = '';

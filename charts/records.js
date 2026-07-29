@@ -4,6 +4,8 @@
  * Shows longest, fastest, most elevation, longest streak, etc.
  */
 
+import { TYPE_COLORS } from '../design-system/activity-colors.js';
+
 /**
  * @param {Activity[]} activities
  * @param {HTMLElement} container
@@ -81,8 +83,6 @@ export function renderRecords(activities, container, units = 'metric', onSelect)
   if (monthBest) {
     records.push({ label: 'Most Active Month', value: `${monthBest.count} activities`, date: monthBest.date, type: null, activity: null });
   }
-
-  const TYPE_COLORS = { Run:'#FF6B6B', Ride:'#4A90D9', Walk:'#5CB85C', Hike:'#F0AD4E', Swim:'#5BC0DE', Other:'#aaaaaa' };
 
   container.innerHTML = '';
   for (const r of records.filter(r => r.value)) {

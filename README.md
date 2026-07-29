@@ -10,35 +10,46 @@ Your files never leave the browser. There is no server, no account, no cloud sto
 
 ## Features
 
-### Activity dashboard
+### Navigation
+
+A persistent top bar with **Map / Charts / Photos** tabs — three sibling views instead of one long scroll. Upload is a modal (auto-opens on first visit, reachable anytime via "Upload data"). Two complete themes — light and dark are each independently designed and WCAG AA checked, not a token flip on top of one palette — with the activity-type colors (Run/Ride/Walk/Hike/Swim) using the colorblind-safe Okabe-Ito palette so every type stays distinguishable under the common forms of color blindness. See [design-system/fitness-theme.md](design-system/fitness-theme.md) for the full token reference.
+
+### Map view
+
 - **Heatmap** of every GPS route with two styles:
-  - *By type* — coloured per activity (Run / Ride / Walk / Hike / Swim)
+  - *By type* — coloured per activity
   - *Frequency* — every route drawn in one low-opacity colour so repeat paths visually darken
+- Locations / By Month / Timelapse controls below the map
+
+### Charts view
+
 - Filter by type, date range, month, or free text
 - Deduplication flags the same activity recorded by multiple devices
-- Metric / imperial toggle (persisted)
-- Dark mode
+- Metric / imperial toggle (persisted, defaults to miles)
+- Monthly distance stacked by activity type, weekly activity calendar, HR zones, personal records, per-activity elevation profile + heart-rate line
 
-### Photo Tour
+### Photos view — Photo Tour
+
 - Drop in photos and/or videos alongside your workouts
 - Each media item is matched to the workout that was underway when it was taken (EXIF timestamp → workout start/end window, adjustable ±0–30 min)
 - If the photo has EXIF GPS it's plotted directly; otherwise the position is interpolated from the workout's GPX trackpoints
 - Per-workout detail view shows the route, small photo markers on the map, and a full grid of every attached photo — click any tile to open a lightbox and fly the map to that spot
-- **Cinema tour mode** — press Play to enter a full-screen tour. The dot traces the entire route in three-phase transits (zoom-out to preview the route slice, animate the dot at a constant km/s, zoom in on the next photo). Split screen shows the active photo/video during each hold; the map full-screens during transits. Videos autoplay with sound (falls back to muted + tap-to-unmute if the browser blocks it).
+- **Cinema tour mode** — press Play to enter a full-screen tour. The dot traces the entire route in three-phase transits (zoom-out to preview the route slice, animate the dot at a constant pace, zoom in on the next photo). Split screen shows the active photo/video during each hold; the map full-screens during transits. Videos autoplay with sound (falls back to muted + tap-to-unmute if the browser blocks it).
 - HEIC images and MP4/MOV videos are supported (HEIC is decoded via lazy-loaded `libheif-js`; MP4/MOV timestamps come from QuickTime atoms via exifr).
+- GPS spike filtering: isolated bad GPX readings (classic "point way off course, big detour to reach it") are automatically dropped so the route trace and animations aren't thrown off by a single bad fix.
 
 ### Share as video
 
-Every workout's Photo Tour has a **Share** button that renders the animation to a **WebM file** so you can post it. Plays inline in Twitter/X, iMessage, Discord, WhatsApp, and Slack. All rendering happens client-side via `canvas.captureStream` + `MediaRecorder` — no server, no wasm.
+Every workout's Photo Tour has a **Share** button that renders the animation to a video file you can post. Plays inline in Twitter/X, iMessage, Discord, WhatsApp, and Slack. All rendering happens client-side via the **WebCodecs API** (`VideoEncoder` + a JS WebM muxer) — no server, no wasm build step.
+
+WebCodecs matters here, not just MediaRecorder: every frame gets an **explicit presentation timestamp**, so the exported video always plays back at exactly the duration your settings imply — no speed drift if the browser tab is busy while rendering, no frozen/fast-forwarded sections.
 
 - **Camera style**: *Overview* (whole route always visible) or *Follow the route* (camera tracks the dot at a tighter zoom)
-- **Cinematic intro** (optional, default on): first few seconds start at a state/country-scale view with a "City, State" text overlay (reverse-geocoded via OpenStreetMap Nominatim), then zoom in to the route
-- **Trip name** field — puts your own label in the video header
-- **Live estimated length** — the "≈ Ns" label updates as you tweak sliders
-- Sliders for **animation speed** (dot moves at a constant km/s regardless of GPX density), **photo pause**, and **max video play time**
-- Real CartoDB Positron basemap tiles drawn under the route; moving red dot sits exactly on a solid tour polyline (no drift between dot and trace)
-
-### Charts
+- **Route pacing**: *Steady* (constant distance/second — long GPS-dense rest stops don't stall the animation) or *Real timing* (dot lingers wherever you actually paused, for a more true-to-the-workout feel)
+- **Cinematic intro** (optional, default on, 2–5s): camera starts at a state/country-scale view and eases into the route, with your **trip name** as a large title overlay (not a geocoded guess — you type it)
+- Sliders for **animation speed** and **photo pause length**; videos in the tour play through their real duration
+- Output can be saved as `.webm` or `.mp4` (the `.mp4` option just re-wraps the same bytes with an mp4 container tag — most players sniff the format and don't care about the extension; Instagram's stricter uploader may still reject it)
+- Real CartoDB Positron basemap tiles drawn under the route; moving dot sits exactly on a solid tour polyline (no drift between dot and trace)
 - Monthly distance stacked by activity type
 - Weekly activity calendar
 - HR zones (when data is present)
@@ -90,8 +101,12 @@ Next page load, `data/photos.json` is picked up automatically. Matching still ru
 ## Architecture
 
 ```
-index.html          — app shell, all screens, all CSS
-app.js              — state, upload orchestration, dedup, view routing
+index.html          — app shell, top nav, view routing markup, upload modal, all CSS
+app.js              — state, upload orchestration, dedup, view routing (Map/Charts/Photos)
+design-system/
+  theme.css         — shared design system (used by sibling apps — see its own README)
+  activity-colors.js— single source of truth for activity-type colors (Okabe-Ito palette)
+  fitness-theme.md  — this app's two-theme token reference
 parsers/
   strava.js         — CSV + GPX (from ZIP)
   apple.js          — chunked export.xml + workout-routes/*.gpx
@@ -100,15 +115,15 @@ parsers/
 map/
   heatmap.js        — multi-route Leaflet layer
   route.js          — single-activity route, coloured by pace or HR
-charts/             — D3 v7 charts
+charts/             — D3 v7 charts (distance, weekly, hr-zones, elevation, records)
 photos/
   matcher.js        — pair photos to workouts, interpolate GPS from GPX time
   list.js           — workouts-with-photos list
   detail.js         — route + photo grid + cinema tour + share modal
   heic.js           — lazy libheif-js decoder
   video.js          — first-frame poster capture via <video> + canvas
-  composite.js      — per-frame drawing (basemap tiles + route + dot + media + intro text)
-  export.js         — WebM render pipeline (timeline, MediaRecorder, Nominatim geocode)
+  composite.js      — per-frame drawing (basemap tiles + route + dot + media + intro title card)
+  export.js         — video render pipeline (timeline, WebCodecs VideoEncoder, GPS spike filter)
 scripts/
   prepare_photos.py — optional offline EXIF extractor
 ```
@@ -138,10 +153,9 @@ Everything runs in the browser. No fitness data, no photo bytes, and no metadata
 
 - Leaflet tile requests to `arcgisonline.com` (dashboard heatmap basemap)
 - CartoDB tile requests to `basemaps.cartocdn.com` (video export basemap)
-- One Nominatim reverse-geocode call to `nominatim.openstreetmap.org` per video export when the cinematic intro is enabled — sends the route's center lat/lng (not any personal data) and receives back a city/state label
 - ESM script downloads from `jsdelivr.net` (D3, exifr, libheif-js) — happens once per page load and is cacheable
 
-If you want fully offline operation, vendor the CDNs locally and turn off the cinematic intro when exporting.
+If you want fully offline operation, vendor the CDNs locally.
 
 ---
 

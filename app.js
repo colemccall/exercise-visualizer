@@ -1393,7 +1393,12 @@ async function renderLocationsPanel() {
 // DARK / LIGHT MODE
 // ═════════════════════════════════════════════════════════════════════════════
 
-let _darkMode = localStorage.getItem('fitness-theme') === 'dark';
+// Respect the user's OS-level preference on first visit; an explicit
+// toggle (persisted below) always wins after that.
+const _storedTheme = localStorage.getItem('fitness-theme');
+let _darkMode = _storedTheme
+  ? _storedTheme === 'dark'
+  : (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
 function applyTheme() {
   document.documentElement.classList.toggle('dark-mode', _darkMode);
