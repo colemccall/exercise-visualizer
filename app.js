@@ -426,10 +426,10 @@ const TYPE_ICONS = {
 };
 
 async function showDashboard() {
-  document.getElementById('upload-screen').style.display = 'none';
+  closeUploadModal();
+  document.getElementById('app-nav').classList.add('visible');
   const dash = document.getElementById('dashboard-screen');
   dash.classList.add('visible');
-  document.getElementById('photos-screen')?.classList.remove('visible');
 
   // Init map immediately while container is visible so invalidateSize works.
   // Pre-load the first routable activity's first trackpoint so the map opens
@@ -445,13 +445,54 @@ async function showDashboard() {
   refreshDashboard();
   showDuplicateBanner();
 
-  // Land at the top of the page — otherwise browser scroll-restoration can
-  // leave the view on whatever chart was rendered last.
+  // Default to Map view after loading
+  switchView('map');
+
   window.scrollTo({ top: 0, behavior: 'auto' });
 
   setTimeout(() => {
     heatmapInstance.invalidateSize();
   }, 150);
+}
+
+/**
+ * Switch between top-level views (map / charts / photos).
+ * Views are peers under the persistent top nav.
+ */
+function switchView(view) {
+  // Nav tab active state
+  document.querySelectorAll('.nav-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.view === view);
+  });
+  // Toggle dashboard subview containers (map, charts) and the photos screen
+  const dash = document.getElementById('dashboard-screen');
+  const photosScreen = document.getElementById('photos-screen');
+  if (view === 'photos') {
+    dash.classList.remove('visible');
+    photosScreen.classList.add('visible');
+    renderCurrentPhotosList();
+  } else {
+    dash.classList.add('visible');
+    photosScreen.classList.remove('visible');
+    document.querySelectorAll('#dashboard-screen .app-view').forEach(v => {
+      v.classList.toggle('active', v.dataset.view === view);
+    });
+    // Leaflet needs to re-measure if the map view just became visible
+    if (view === 'map') {
+      setTimeout(() => { try { heatmapInstance?.invalidateSize(); } catch {} }, 100);
+    }
+  }
+  window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+function openUploadModal() {
+  document.getElementById('upload-modal-backdrop').classList.add('visible');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeUploadModal() {
+  document.getElementById('upload-modal-backdrop').classList.remove('visible');
+  document.body.style.overflow = '';
 }
 
 /**
@@ -496,9 +537,7 @@ async function renderCurrentPhotosList() {
 }
 
 function showPhotosView() {
-  document.getElementById('dashboard-screen').classList.remove('visible');
-  document.getElementById('photos-screen').classList.add('visible');
-  renderCurrentPhotosList();
+  switchView('photos');
 }
 
 async function showPhotosDetail(activity) {
@@ -509,17 +548,14 @@ async function showPhotosDetail(activity) {
 }
 
 function updatePhotosNav() {
-  const btn   = document.getElementById('btn-photos-view');
-  const badge = document.getElementById('photos-count-badge');
-  if (!btn) return;
+  const badge = document.getElementById('nav-photos-badge');
+  const tab   = document.getElementById('nav-tab-photos');
   const n = photoMatchSummary?.matched || 0;
-  if (n > 0) {
-    btn.classList.add('available');
-    if (badge) badge.textContent = `(${n})`;
-  } else {
-    btn.classList.remove('available');
-    if (badge) badge.textContent = '';
+  if (badge) {
+    if (n > 0) { badge.textContent = String(n); badge.hidden = false; }
+    else       { badge.textContent = ''; badge.hidden = true; }
   }
+  if (tab) tab.disabled = n === 0;
 }
 
 function showDuplicateBanner() {
@@ -937,13 +973,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btn-go')?.addEventListener('click', parseAllStaged);
 
-  // Photos view nav
-  document.getElementById('btn-photos-view')?.addEventListener('click', showPhotosView);
-  document.getElementById('btn-photos-back')?.addEventListener('click', () => {
-    document.getElementById('photos-screen').classList.remove('visible');
-    document.getElementById('dashboard-screen').classList.add('visible');
-    setTimeout(() => heatmapInstance?.invalidateSize(), 100);
+  // Top nav — view routing
+  document.querySelectorAll('.nav-tab').forEach(tab => {
+    tab.addEventListener('click', () => switchView(tab.dataset.view));
   });
+
+  // Open / close upload modal from the nav
+  document.getElementById('btn-open-upload')?.addEventListener('click', openUploadModal);
+  document.getElementById('btn-close-upload')?.addEventListener('click', closeUploadModal);
+  document.getElementById('upload-modal-backdrop')?.addEventListener('click', (e) => {
+    // Click on the backdrop (not the card) closes
+    if (e.target.id === 'upload-modal-backdrop') closeUploadModal();
+  });
+
+  // Legacy Photos back button — go back to Map view
+  document.getElementById('btn-photos-back')?.addEventListener('click', () => switchView('map'));
+
+  // Auto-open the upload modal on first load if no data is present yet
+  if (allActivities.length === 0) {
+    openUploadModal();
+  }
 
   // Duplicate banner
   document.getElementById('btn-dup-review')?.addEventListener('click', () => {
@@ -966,13 +1015,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Apply stored units
   setUnits(units);
 
-  // New Upload button
-  document.getElementById('btn-new-upload').addEventListener('click', () => {
-    document.getElementById('upload-screen').style.display = '';
-    document.getElementById('dashboard-screen').classList.remove('visible');
-    // Scroll to top
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  });
+  // (Legacy: "New Upload" button is now the top-nav "Upload data" button)
 
   // Search
   document.getElementById('filter-search').addEventListener('input', (e) => {

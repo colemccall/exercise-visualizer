@@ -255,13 +255,148 @@
       width: 0%;
     }
 
-    /* -- Dashboard -- */
+    /* ─── Persistent top nav ─────────────────────────────── */
+    #app-nav {
+      position: sticky; top: 0; z-index: 900;
+      display: none; /* shown once we have data */
+      align-items: center;
+      gap: var(--sp-3);
+      padding: 10px var(--sp-6);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: saturate(1.2) blur(6px);
+    }
+    #app-nav.visible { display: flex; }
+    .nav-brand {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .nav-tabs {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      background: var(--surface-2);
+      border-radius: 999px;
+      margin-left: var(--sp-2);
+    }
+    .nav-tab {
+      appearance: none;
+      border: none;
+      background: transparent;
+      font-family: var(--font-body);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-mid);
+      padding: 6px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: color 120ms, background 120ms;
+    }
+    .nav-tab:hover { color: var(--text); }
+    .nav-tab.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .nav-tab .nav-badge {
+      background: rgba(255,255,255,0.28);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 999px;
+      min-width: 18px;
+      text-align: center;
+    }
+    .nav-tab:not(.active) .nav-badge {
+      background: var(--border);
+      color: var(--text-mid);
+    }
+    .nav-actions {
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sp-2);
+    }
+
+    /* ─── View containers ───────────────────────────────── */
+    .app-view { display: none; }
+    .app-view.active { display: block; }
+
+    /* ─── Dashboard shell ──────────────────────────── */
     #dashboard-screen { display: none; }
     #dashboard-screen.visible { display: block; }
 
-    /* -- Photos screen -- */
+    /* ─── Photos screen (retained separate but nested under nav) ─ */
     #photos-screen { display: none; }
     #photos-screen.visible { display: block; }
+
+    /* ─── Upload modal (replaces full-screen upload) ─────── */
+    .upload-modal-backdrop {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 2000;
+      align-items: flex-start;
+      justify-content: center;
+      padding: var(--sp-4);
+      overflow-y: auto;
+    }
+    .upload-modal-backdrop.visible { display: flex; }
+    .upload-modal-inner {
+      background: var(--surface);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+      width: 100%;
+      max-width: 720px;
+      margin: var(--sp-6) auto;
+      position: relative;
+    }
+    .upload-modal-close {
+      position: absolute;
+      top: 12px; right: 12px;
+      background: transparent;
+      border: none;
+      font-size: 22px;
+      color: var(--text-mid);
+      cursor: pointer;
+      width: 32px; height: 32px;
+      border-radius: 50%;
+    }
+    .upload-modal-close:hover { background: var(--surface-2); color: var(--text); }
+
+    /* ─── Map view: convert sidebar to strip below map ─── */
+    #view-map #heatmap-explore-wrapper {
+      flex-direction: column;
+      height: auto;
+    }
+    #view-map #heatmap-container {
+      height: 60vh;
+      min-height: 400px;
+    }
+    #view-map #explore-panel {
+      width: 100%;
+      height: auto;
+      border-left: none;
+      border-top: 1px solid var(--border);
+      max-height: 260px;
+    }
+    #view-map .explore-tabs {
+      justify-content: flex-start;
+    }
+    #view-map .etab { flex: 0 0 auto; padding: 10px 20px; }
+    #view-map .etab-pane {
+      max-height: 200px;
+      overflow-y: auto;
+      padding: var(--sp-3) var(--sp-4);
+    }
+    #view-map .etab-pane#etab-timelapse { max-height: none; }
     .photos-screen-inner { max-width: 1200px; margin: 0 auto; padding: var(--sp-4) var(--sp-6); }
     .photos-header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); }
     .photos-title { font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--text); }
@@ -1302,11 +1437,34 @@
 <body class="app-fitness">
 
 <!-- ================================================================
-     UPLOAD SCREEN  (centered, max-width)
+     PERSISTENT TOP NAV (shown once we have data)
 ================================================================ -->
-<div class="upload-wrapper">
+<nav id="app-nav" role="navigation" aria-label="Main">
+  <div class="nav-brand">&#127939; Fitness Visualizer</div>
+  <div class="nav-tabs" role="tablist">
+    <button class="nav-tab active" data-view="map" role="tab">Map</button>
+    <button class="nav-tab" data-view="charts" role="tab">Charts</button>
+    <button class="nav-tab" data-view="photos" role="tab" id="nav-tab-photos">
+      Photos <span class="nav-badge" id="nav-photos-badge" hidden></span>
+    </button>
+  </div>
+  <div class="nav-actions">
+    <div class="unit-toggle">
+      <button id="btn-metric">km</button>
+      <button id="btn-imperial" class="active">mi</button>
+    </div>
+    <button class="bs-btn bs-btn-secondary" id="btn-open-upload" style="font-size:12px; padding:6px 14px;">&#128194; Upload data</button>
+    <button class="tl-btn" id="btn-theme-toggle" style="font-size:12px;">🌙</button>
+  </div>
+</nav>
+
+<!-- ================================================================
+     UPLOAD MODAL (was full-screen; now overlay)
+================================================================ -->
+<div class="upload-modal-backdrop" id="upload-modal-backdrop">
 <div id="upload-screen">
-  <div class="bs-card">
+  <div class="bs-card upload-modal-inner">
+    <button class="upload-modal-close" id="btn-close-upload" title="Close" aria-label="Close">&times;</button>
 
     <!-- Upload screen header -->
     <div style="display:flex; align-items:center; justify-content:space-between; padding:var(--sp-4) var(--sp-6); border-bottom:1px solid var(--border);">
@@ -1413,7 +1571,7 @@
 
   </div><!-- /.bs-card -->
 </div><!-- /#upload-screen -->
-</div><!-- /.upload-wrapper -->
+</div><!-- /.upload-modal-backdrop -->
 
 
 <!-- ================================================================
@@ -1421,20 +1579,6 @@
 ================================================================ -->
 <div id="dashboard-screen">
   <div class="bs-card" style="margin-bottom:var(--sp-4);">
-
-    <!-- Controls row -->
-    <div class="header-controls">
-      <span class="dash-title">&#127939; Fitness Visualizer</span>
-      <button class="bs-btn bs-btn-secondary" id="btn-new-upload" style="font-size:12px; padding:6px 14px;">
-        + New Upload
-      </button>
-      <div class="unit-toggle">
-        <button id="btn-metric">km</button>
-        <button id="btn-imperial" class="active">mi</button>
-      </div>
-      <button class="bs-btn bs-btn-secondary" id="btn-photos-view" style="font-size:12px; padding:6px 14px;">&#128247; Photos <span id="photos-count-badge" style="opacity:0.7"></span></button>
-      <button class="tl-btn" id="btn-theme-toggle" style="margin-left:auto;">🌙 Dark</button>
-    </div>
 
     <!-- Duplicate banner (hidden until duplicates found) -->
     <div id="duplicate-banner" style="display:none;">
@@ -1446,6 +1590,9 @@
       <button class="dup-btn-review" id="btn-dup-review">Review duplicates</button>
       <button class="dup-btn-dismiss" id="btn-dup-dismiss">&times;</button>
     </div>
+
+    <!-- ══════ MAP VIEW ══════ -->
+    <section class="app-view active" data-view="map" id="view-map">
 
     <!-- Heatmap + Explore panel -->
     <div id="heatmap-explore-wrapper">
@@ -1498,6 +1645,11 @@
         </div>
       </div><!-- /#explore-panel -->
     </div><!-- /#heatmap-explore-wrapper -->
+
+    </section><!-- /#view-map -->
+
+    <!-- ══════ CHARTS VIEW ══════ -->
+    <section class="app-view" data-view="charts" id="view-charts">
 
     <!-- Stats bar — 6 stats -->
     <div class="stats-bar">
@@ -1584,6 +1736,8 @@
       </div>
 
     </div><!-- /.charts-row -->
+
+    </section><!-- /#view-charts -->
 
   </div><!-- /.bs-card -->
 </div><!-- /#dashboard-screen -->
