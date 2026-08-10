@@ -4,7 +4,7 @@
  *
  * Responsibilities:
  *   - Upload handling (drag-and-drop + click-to-browse for 3 sources)
- *   - Orchestrate parsers (strava, apple, garmin)
+ *   - Orchestrate parsers (strava, apple)
  *   - Merge activity lists, run deduplication
  *   - Manage filter state (type, date range)
  *   - Unit toggle (metric / imperial), stored in localStorage
@@ -87,7 +87,7 @@ const PARSERS = { strava: parseStrava, apple: parseApple };
 const PHOTO_SOURCES = ['photos'];
 
 /** Staged (not yet parsed) files per source */
-const stagedFiles = { strava: [], apple: [], garmin: [], photos: [] };
+const stagedFiles = { strava: [], apple: [], photos: [] };
 
 function setupUploadZone(source) {
   const zone  = document.getElementById(`zone-${source}`);
@@ -1301,7 +1301,6 @@ async function reverseGeocode(lat, lng) {
 }
 
 async function computeTopLocations(activities, limit = 10) {
-  // Cluster activity start points by 0.5° grid cell (~55km)
   const counts = new Map();
   const centers = new Map();
 
@@ -1311,13 +1310,17 @@ async function computeTopLocations(activities, limit = 10) {
     const p = pts.find(x => x.lat !== null && x.lng !== null);
     if (!p) continue;
 
-    // ~2° grid cell (~220km) — wide enough to cluster a metro region together
+    // Cluster on a 2° grid (~220km) — wide enough to keep a metro region together.
     const cellLat = Math.round(p.lat * 0.5) / 0.5;
     const cellLng = Math.round(p.lng * 0.5) / 0.5;
     const key = `${cellLat},${cellLng}`;
 
     counts.set(key, (counts.get(key) || 0) + 1);
-    if (!centers.has(key)) centers.set(key, { lat: cellLat, lng: cellLng });
+    // Represent the cell with a real activity point, not the rounded cell corner:
+    // the corner can sit >120km from anything the user actually did, which both
+    // reverse-geocodes to the wrong region near borders/coastlines and makes
+    // click-to-zoom (setView at z11, below) land on empty ground.
+    if (!centers.has(key)) centers.set(key, { lat: p.lat, lng: p.lng });
   }
 
   if (counts.size === 0) return [];
