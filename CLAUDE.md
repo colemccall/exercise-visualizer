@@ -1,61 +1,103 @@
 # Fitness Visualizer — Claude Code Context
 
-Client-side fitness data visualizer. Upload Strava, Apple Health, or Garmin export ZIPs. All parsing happens in the browser — no data ever leaves the device. Shows activity heatmap, charts, and activity detail with route map.
+Client-side fitness data visualizer. Upload a Strava or Apple Health export ZIP,
+optionally drop in photos/videos. All parsing happens in the browser — no data
+ever leaves the device. Shows a route heatmap, charts, and a photo tour that can
+be exported as a shareable video.
+
+Live: https://colemccall.github.io/exercise-visualizer/ (GitHub Pages, from `master`).
+
+`README.md` is the user-facing feature description and is accurate — read it for
+what the app *does*. This file covers what a contributor needs to know.
 
 ## Current State
 
 **Built and working:**
-- Upload screen: 3 drop zones (Strava, Apple, Garmin), drag-or-click, progress bar
-- Privacy notice (prominent, required)
-- All 4 parsers: strava.js, apple.js, garmin.js, gpx.js
-- Normalized Activity data model (all sources produce identical objects)
-- Deduplication: flags activities within 5 min + 5% distance as possible duplicates
-- Dashboard: stats bar, activity list, filter by type + date range
-- Heatmap: Leaflet multi-route layer, lazy-loads top 50 routes on first render
-- Activity detail modal: single route map, elevation profile, HR chart
-- 4 D3 charts: distance over time, weekly stacked bar, HR zones, elevation profile
-- Metric/imperial toggle (localStorage)
-- Source badges per activity
+- Persistent top nav with three sibling views: **Map / Charts / Photos**. Upload is
+  a modal (auto-opens on first visit, reachable anytime via "Upload data").
+- Two complete themes (light + dark), each independently designed and WCAG AA
+  checked — not a token flip over one palette. Activity colors use the
+  colorblind-safe Okabe-Ito palette.
+- Parsers: `strava.js`, `apple.js`, `gpx.js`, `photos.js`
+- Normalized Activity model — every parser emits the same shape
+- Dedup: flags the same workout recorded by both sources
+- Heatmap (By Type / Frequency styles), Locations / By Month / Timelapse panel
+- Charts: monthly distance, weekly calendar, HR zones, personal records,
+  per-activity elevation + HR line
+- Photo Tour: EXIF-timestamp → workout matching, GPS interpolation from GPX,
+  cinema tour playback, HEIC + MP4/MOV support
+- Video export via WebCodecs (`VideoEncoder` + JS WebM muxer), with camera style,
+  route pacing, cinematic intro, speed/pause sliders
+- Metric/imperial toggle (localStorage, defaults to miles)
+- GPS spike filtering
 
-**Not yet built:**
-- [ ] End-to-end test with real Strava/Apple/Garmin ZIP files — parsers written but untested against real exports
-- [ ] Loading progress bar during large XML parse (Apple Health can be 500MB+)
-- [ ] Mobile responsive layout
-- [ ] Share card (html2canvas summary PNG) — not in original spec but worth adding
-- [ ] Railway / GitHub Pages deployment
+**Validated against real exports** (2026-08-10) — see "Real Test Data" below.
+Both sources parse end-to-end and the full Map/Charts flow renders with no
+uncaught errors. Four bugs were found and fixed in that pass; see git log.
 
-No auth needed — fully anonymous. No data stored between sessions.
+**Not yet built / known gaps:**
+- [ ] Photo Tour cinema view has not been audited on a narrow viewport (the rest
+      of the app has — see "Mobile / iOS" below)
+- [ ] Web Worker for Apple XML parsing — only needed if a real export freezes the
+      tab. It does not today: a 875MB `export.xml` streams in ~4s (see below).
+- [ ] Share card (html2canvas summary PNG)
 
-## Design System
+No auth. No data stored between sessions.
 
-Uses `../../design-system/theme.css` (or `./design-system/theme.css` after repo split).
-App theme class: `.app-fitness` (red `#DC2626` → orange `#EA580C`).
-Fonts: Barlow Condensed (headlines) + Inter (body) via Google Fonts.
+## Sources
+
+Strava and Apple Health only. **Garmin is deliberately not supported** — a written
+but never-wired-up `parsers/garmin.js` was deleted on 2026-08-10 (it had no drop
+zone and was never imported by `app.js`). Don't "restore" it without a real Garmin
+export to test against; recover it from git history if it's ever wanted back.
 
 ## Tech Stack
 
-Vanilla HTML/CSS/JS. Leaflet + D3 v7 (ESM) + JSZip via CDN.
-**Requires a local server** — ES module imports won't work from `file://`.
-Use VS Code Live Server extension or: `npx serve .`
+Vanilla HTML/CSS/JS. Leaflet + D3 v7 (ESM) + JSZip + exifr + libheif-js via CDN.
+No framework, no bundler, no build step.
+
+**Requires a local server** — ES module imports won't work from `file://`:
+```bash
+npx serve .
+```
+Avoid `python -m http.server` on Windows — it serves `.js` as `text/plain`, which
+breaks module loading.
 
 ## Key Files
 
 ```
-index.html              — app shell, upload screen, dashboard layout
-app.js                  — state, upload handling, dedup, unit toggle, activity list
+index.html              — app shell, top nav, view markup, upload modal, ALL CSS
+app.js                  — state, upload orchestration, dedup, view routing,
+                          filters, activity list, explore panel, timelapse
+design-system/
+  theme.css             — shared design system (also used by sibling apps)
+  activity-colors.js    — single source of truth for activity-type colors
+  fitness-theme.md      — this app's two-theme token reference
 parsers/
-  gpx.js               — shared GPX parser (DOMParser-based)
-  strava.js            — Strava ZIP: activities.csv + GPX lazy load
-  apple.js             — Apple Health: chunked export.xml parsing
-  garmin.js            — Garmin: summarizedActivities.json + GPX
+  gpx.js                — shared GPX trackpoint parser (DOMParser-based)
+  strava.js             — activities.csv + lazy GPX from ZIP
+  apple.js              — streamed export.xml + workout-routes/*.gpx
+  photos.js             — EXIF via exifr (photos + video atoms)
 charts/
-  distance.js          — D3 line chart (distance over time + 30-day MA)
-  weekly.js            — D3 stacked bar (activities per week by type)
-  hr-zones.js          — D3 horizontal bar (% time in 5 HR zones)
-  elevation.js         — D3 area chart (elevation profile, detail view)
+  distance.js           — monthly distance, stacked by type
+  weekly.js             — weekly activity calendar
+  hr-zones.js           — % time in 5 HR zones
+  elevation.js          — elevation profile + HR line (detail view)
+  records.js            — personal records
 map/
-  heatmap.js           — multi-route Leaflet Polyline layer
-  route.js             — single activity route, color-coded by pace
+  heatmap.js            — multi-route Leaflet layer
+  route.js              — single route, colored by pace or HR
+photos/
+  matcher.js            — pair photos to workouts, interpolate GPS from GPX time
+  list.js               — workouts-with-photos list
+  detail.js             — route + photo grid + cinema tour + share modal
+  heic.js               — lazy libheif-js decoder
+  video.js              — first-frame poster capture
+  composite.js          — per-frame drawing (tiles + route + dot + media + intro)
+  export.js             — video render pipeline (timeline, WebCodecs, spike filter)
+scripts/
+  prepare_photos.py     — optional offline EXIF extractor
+coi-serviceworker.js    — retired; MP4 export no longer needs COI headers
 ```
 
 ## Normalized Activity Model
@@ -64,72 +106,136 @@ Every parser returns this — the UI never reads raw source data:
 ```javascript
 {
   id: String,                    // "strava-12345678"
-  source: "strava"|"apple"|"garmin",
+  source: "strava"|"apple",
   name: String,
   type: "Run"|"Ride"|"Walk"|"Hike"|"Swim"|"Other",
-  date: Date,
+  date: Date,                    // always a real instant — see timezone note below
   distance_m: Number,            // always meters internally
   duration_s: Number,            // always seconds
   elevation_gain_m: Number|null,
   avg_heart_rate: Number|null,
   max_heart_rate: Number|null,
   has_route: Boolean,
-  gpx_file: String|null,         // ZIP-internal path for lazy load
-  route_points: null,            // populated on demand by loadRoute()
+  gpx_file: String|null,         // ZIP-internal path
+  route_points: null,            // populated on demand
+  _gpxLoader: async () => Point[], // lazy route loader, attached by the parser
   has_duplicate: false,          // set by dedup logic in app.js
+  photos: [...],                 // attached by photos/matcher.js
 }
 ```
 
-## Testing the Parsers
+### Timezone gotcha (bit us once — don't regress it)
 
-To test without real ZIP files, create a mock:
+Strava's `activities.csv` writes `"Apr 22, 2026, 3:14:03 AM"` with **no timezone
+marker, and the value is UTC**. Handing that to `new Date()` reads it as *local*
+time and shifts every activity by the viewer's UTC offset — enough to move
+late-evening workouts to the next day and to break cross-source dedup entirely
+(dedup only pairs activities within 10 minutes). `parsers/strava.js` has
+`parseStravaDate()` for this; it's verified against the Z-suffixed `<time>` of the
+first GPX trackpoint, which agrees to the second.
+
+### Apple route attachment
+
+Routes attach **only** via the `<FileReference>` inside each `<Workout>`. There is
+deliberately no "match a route by date" fallback: route filenames carry the
+workout's *creation* date in local time, so matching them to a workout's UTC
+calendar day mislabels — and it only ever fired for workouts that genuinely have
+no route (yoga, strength), handing them someone else's GPS trace.
+
+## Mobile / iOS
+
+Audited on 2026-08-10 at iPhone 13 (390px), iPhone SE (375px), and landscape.
+
+**The rule that matters: nothing may be wider than the viewport.** When any element
+overflows horizontally, mobile browsers shrink the *entire page* to fit — the app
+renders at ~60% scale and every tap target shrinks with it. This happened for real:
+the top nav packed ~635px of content into a 390px bar. If the app ever looks
+"zoomed out" on a phone, measure `document.documentElement.scrollWidth` against
+`window.innerWidth` and find the offender; don't reach for `initial-scale`.
+
+Traps already handled — don't undo them:
+- **Nav** wraps to two rows below 700px; the "Upload data" label is hidden (icon +
+  `aria-label` remain).
+- **Charts grid** needs `grid-column: 1 / -1 !important` on the cards. Two carry an
+  inline `grid-column: span 2`, which outranks any stylesheet rule, and the grid
+  then invents an implicit column that collapses a sibling card to ~40px.
+- **Upload modal**: `#upload-screen` is a flex item, so `min-width: auto` pinned it
+  to its content's 440px min-content width until `min-width: 0` was set.
+- **Form fields need `font-size: 16px`** on coarse pointers. Below 16px, iOS Safari
+  zooms the page in on focus and never zooms back out.
+- **`100dvh`** (with a `100vh` fallback) on the cinema/fullscreen tour — plain `vh`
+  is clipped by iOS Safari's collapsing toolbar.
+- **`accept` needs MIME types, not just extensions.** The iOS Files picker resolves
+  `accept` to UTIs and greys out ZIP files when given bare `.zip`.
+- Tap targets are 44px minimum under `@media (pointer: coarse)` per Apple's HIG.
+
+Caveat: this was verified in Chrome's iOS emulation, which matches layout but not
+the real WebKit engine. Untested on a physical iPhone: actual Files-app upload,
+and Safari's per-tab memory ceiling on a large Apple Health ZIP.
+
+## Apple Health Performance
+
+`apple.js` streams `<Workout>` blocks out of the ZIP entry via JSZip's
+`internalStream`, keeping only a small carry-over buffer — the full XML is never
+decompressed into a JS string (Apple exports can exceed the ~1GB string limit).
+Measured: **875MB `export.xml` → 402 activities in ~3.6s.** A Web Worker is not
+currently needed.
+
+## Activity Type Colors
+
+Import from `design-system/activity-colors.js` — do not redeclare these:
 ```javascript
-// In browser console after opening index.html via Live Server:
-// Drag a real Strava export.zip onto the Strava drop zone
-// Check console for parse errors and activity count
+Run: '#D55E00'  Ride: '#0072B2'  Walk: '#009E73'
+Hike: '#E69F00' Swim: '#56B4E9'  Other: '#8A8D99'
 ```
-
-Real export sources:
-- **Strava**: strava.com/athlete/delete_your_account → Request Archive
-- **Apple**: iPhone Settings → Health → your profile → Export All Health Data
-- **Garmin**: garmin.com/account/dataManagement → Export Data
-
-## Apple Health Performance Note
-
-`apple.js` uses chunked regex parsing to avoid loading 500MB+ XML into DOM.
-If users report browser freezes on very large files, the next step is moving
-`apple.js` parsing into a Web Worker. The function signature stays the same —
-just wrap in `new Worker()` and use `postMessage` for the zip file and results.
-
-## Activity Type Colors (consistent across all charts + map)
-
-```javascript
-const TYPE_COLORS = {
-  Run:   '#FF6B6B',  // coral
-  Ride:  '#4A90D9',  // blue
-  Walk:  '#5CB85C',  // green
-  Hike:  '#F0AD4E',  // amber
-  Swim:  '#5BC0DE',  // teal
-  Other: '#aaaaaa',  // grey
-};
-```
+Okabe-Ito palette — stays distinguishable under protanopia, deuteranopia, and
+tritanopia. Same hex values in both themes.
 
 ## Real Test Data
 
-Real export ZIPs are already available at `c:\Projects\VibeCoding\Workout-Maps\`:
-- `export-2.zip` (~58MB) — drag onto Strava or Apple drop zone to test
-- `export-3.zip` (~58.4MB)
-- `export_105992264.zip` (~11.9MB) — likely Garmin export
-- `Mix of Apple Watch and Strava GPX\` — individual GPX files for quick parser testing
+Real export ZIPs live at `c:\Projects\VibeCoding\Workout-Maps\`:
+- `export-2.zip` (~58MB) — **Apple Health** (875MB export.xml, 402 workouts, 330 routes)
+- `export-3.zip` (~58.4MB) — Apple Health (332 routes)
+- `early july export.zip` — Apple Health (435 routes)
+- `export_105992264.zip` (~11.9MB) — **Strava** (441 activities, 67 GPX)
+- `Mix of Apple Watch and Strava GPX\` — loose GPX for quick parser checks
 
-Start here for step 1 of remaining work — no need to request an archive export.
+Note `export_105992264.zip` is a Strava export, not Garmin as previously assumed.
+
+### Testing approach
+
+Two levels, both worth doing:
+
+1. **Parsers headless in Node.** Copy `parsers/*.js` to a scratch dir, add a
+   `package.json` with `{"type":"module"}` so Node treats them as ESM, then shim
+   the two browser globals they assume:
+   ```javascript
+   global.JSZip = JSZip;                              // npm jszip
+   global.DOMParser = new JSDOM('').window.DOMParser; // npm jsdom
+   ```
+   A Node `Buffer` with a `.name` property works in place of a `File`. Fast to
+   iterate, and lets you assert on counts/dates directly.
+
+2. **Real browser.** Chrome is installed locally, so `playwright-core` can drive
+   it without downloading a browser:
+   ```javascript
+   chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe' })
+   ```
+   Feed the real ZIPs through `#file-strava` / `#file-apple` with
+   `setInputFiles`, click **Analyze →**, then wait on `.stats-bar` having digits.
+   Watch for zero-size Leaflet containers — `invalidateSize()` cannot rescue an
+   element whose CSS height resolves to 0.
 
 ---
 
 ## Remaining Work (Ordered)
 
-1. **Test with real data** — use the ZIPs in `Workout-Maps\` above. Run through the full parse flow. Fix any parser bugs found.
-2. Loading progress bar: show % complete during Apple XML chunked parse
-3. Large file handling: test Apple export >100MB, add Web Worker if needed
-4. Mobile responsive: activity list full-width, charts stack vertically
-5. Deploy to Railway or GitHub Pages
+1. **Photo Tour + video export against real photos** — the photo pipeline and
+   WebCodecs export have not been exercised in this validation pass (only
+   workouts were). Use the GPX folder plus a real camera roll. Check the cinema
+   tour on a phone while you're there; it's the one surface the mobile pass
+   didn't cover.
+2. **Verify on a physical iPhone** — real Files-app upload and Safari memory on a
+   large Apple Health ZIP. Emulation can't answer either.
+3. Web Worker for Apple parsing — only if a real export is measured to freeze.
+4. Share card (html2canvas summary PNG).

@@ -1,6 +1,6 @@
 # Fitness Visualizer
 
-A **100% client-side** fitness data visualizer. Drop in your Strava, Apple Health, or Garmin export and see a heatmap of every route you've ever recorded, per-activity charts, and a photo tour that pairs your camera roll with the workout that was happening when each shot was taken.
+A **100% client-side** fitness data visualizer. Drop in your Strava or Apple Health export and see a heatmap of every route you've ever recorded, per-activity charts, and a photo tour that pairs your camera roll with the workout that was happening when each shot was taken.
 
 Your files never leave the browser. There is no server, no account, no cloud storage.
 
@@ -64,7 +64,6 @@ WebCodecs matters here, not just MediaRecorder: every frame gets an **explicit p
 |---|---|
 | **Strava** | strava.com → Settings → My Account → Download or Delete Your Account → Request Your Archive |
 | **Apple Health** | iPhone Health app → profile picture → Export All Health Data |
-| **Garmin** | garmin.com → account → Data Management → Export Data |
 
 Drop the resulting ZIP on the matching upload zone. Photos are dragged in loose (JPG / HEIC / MP4 / MOV).
 
