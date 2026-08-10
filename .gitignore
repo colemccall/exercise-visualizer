@@ -1,0 +1,20 @@
+# Personal data exports — never commit these.
+# This app is about private health data; a Strava/Apple Health export dropped in
+# the project folder for testing must not end up in a public repo.
+*.zip
+export*.xml
+apple_health_export/
+data/photos.json
+
+# Photos/videos used for local Photo Tour testing
+photos/*.jpg
+photos/*.jpeg
+photos/*.png
+photos/*.heic
+photos/*.mov
+photos/*.mp4
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+node_modules/
