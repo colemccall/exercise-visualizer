@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- viewport-fit=cover lets the page paint into the notch/home-indicator area;
+       the safe-area-inset padding in the mobile block below keeps content clear of it. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Fitness Activity Visualizer</title>
 
   <!-- One-time cleanup: deregisters an earlier COI service worker that
@@ -23,6 +25,11 @@
     body {
       background: var(--surface);
       min-height: 100vh;
+      /* dvh tracks iOS Safari's collapsing toolbars; vh above is the fallback. */
+      min-height: 100dvh;
+      /* Stop iOS from inflating text in landscape ("text autosizing"). */
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
     }
 
     /* Upload screen: centered narrow wrapper */
@@ -371,6 +378,13 @@
       height: auto;
     }
     #view-map #heatmap-container {
+      /* flex: 0 0 auto is load-bearing. #heatmap-container is a flex item, and this
+         view stacks the wrapper into a column with height:auto. Left as `flex: 1`,
+         flex-basis governs the vertical size and `height: 60vh` is ignored, so the
+         container has no *specified* height — which makes `#heatmap { height: 100% }`
+         resolve to auto. Every Leaflet pane is absolutely positioned, so that
+         collapses the map to 0px and the whole Map view renders blank. */
+      flex: 0 0 auto;
       height: 60vh;
       min-height: 400px;
     }
@@ -606,6 +620,7 @@
       display: flex;
       width: 100vw;
       height: 100vh;
+      height: 100dvh;
       background: #000;
       transition: none;
     }
@@ -614,12 +629,14 @@
       min-height: 0;
       min-width: 0;
       height: 100vh;
+      height: 100dvh;
       transition: flex-basis 320ms ease;
     }
     body.cinema-tour .pd-preview {
       position: static;
-      max-height: 100vh;
+      max-height: 100dvh;
       height: 100vh;
+      height: 100dvh;
       border-radius: 0;
       box-shadow: none;
       transition: flex-basis 320ms ease, opacity 220ms ease;
@@ -635,10 +652,10 @@
     .tour-dot-marker { filter: drop-shadow(0 0 6px rgba(220,38,38,0.6)); }
     @media (max-width: 900px) {
       body.cinema-tour .photos-detail-mapwrap { flex-direction: column; }
-      body.cinema-full .photos-detail-map    { flex: 1 1 100vh; height: 100vh; }
+      body.cinema-full .photos-detail-map    { flex: 1 1 100dvh; height: 100dvh; }
       body.cinema-full .pd-preview           { flex: 0 0 0vh; height: 0; }
-      body.cinema-split .photos-detail-map   { flex: 1 1 50vh; height: 50vh; }
-      body.cinema-split .pd-preview          { flex: 1 1 50vh; height: 50vh; }
+      body.cinema-split .photos-detail-map   { flex: 1 1 50dvh; height: 50dvh; }
+      body.cinema-split .pd-preview          { flex: 1 1 50dvh; height: 50dvh; }
     }
     /* Floating control pill visible only in cinema mode */
     .cinema-controls {
@@ -1052,8 +1069,10 @@
     .activity-source-badge.apple   { background: #f5f5f5; color: #555; }
 
     .duplicate-badge {
-      position: absolute;
-      top: 4px; right: 40px;
+      /* Sits in the row's flex flow rather than absolutely positioned over it —
+         at right:40px it landed on top of the distance figure. */
+      flex-shrink: 0;
+      white-space: nowrap;
       font-size: 9px;
       background: var(--warn-bg);
       color: var(--warn);
@@ -1521,6 +1540,142 @@
     }
 
     /* ═══════════════════════════════════════════════════════════════
+       PHONE LAYOUT (≤700px)
+
+       The single most important rule here is that nothing may be wider
+       than the viewport. When any element overflows horizontally, mobile
+       browsers shrink the *whole page* to fit it — the app then renders
+       at ~60% scale and every tap target shrinks with it. The top nav
+       used to do exactly that: ~635px of content in a 390px bar.
+       ═══════════════════════════════════════════════════════════════ */
+    @media (max-width: 700px) {
+      /* Nav becomes two rows: brand + actions, then a full-width tab bar. */
+      #app-nav {
+        flex-wrap: wrap;
+        gap: var(--sp-2);
+        padding: 8px var(--sp-3);
+        padding-top: calc(8px + env(safe-area-inset-top));
+        padding-left: calc(var(--sp-3) + env(safe-area-inset-left));
+        padding-right: calc(var(--sp-3) + env(safe-area-inset-right));
+      }
+      .nav-brand {
+        font-size: 15px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .nav-actions { margin-left: auto; gap: 6px; }
+      .nav-tabs {
+        order: 3;
+        width: 100%;
+        margin-left: 0;
+        justify-content: space-between;
+      }
+      .nav-tab { flex: 1; justify-content: center; padding: 10px 8px; }
+
+      /* "Upload data" keeps its folder icon but drops the label — the label is
+         what pushed this row past the viewport. aria-label carries the meaning. */
+      .nav-btn-label { display: none; }
+      #btn-open-upload { padding: 8px 12px !important; font-size: 16px !important; }
+
+      /* Filters stack instead of forming a long single line. */
+      .filter-row { padding: var(--sp-3); gap: var(--sp-2); }
+      .filter-row input[type="search"] { max-width: none !important; flex: 1 1 100% !important; }
+      .filter-row input[type="date"] { flex: 1 1 40%; min-width: 0; }
+      .filter-row select { flex: 1 1 30%; }
+
+      /* Map: leave room for the explore panel without a 400px floor on a
+         664px-tall screen. */
+      #view-map #heatmap-container { height: 52vh; min-height: 260px; }
+      #explore-panel { max-height: none; }
+      #view-map .etab-pane { max-height: 240px; }
+
+      .stats-bar { grid-template-columns: repeat(2, 1fr); }
+      .timelapse-bar { padding: var(--sp-3); gap: var(--sp-2); }
+
+      /* Activity rows: let the name truncate rather than push the row wide. */
+      .activity-row { padding: var(--sp-2) var(--sp-3); flex-wrap: wrap; }
+      .activity-stats { margin-left: auto; }
+      .duplicate-badge { font-size: 8px; }
+
+      .upload-wrapper,
+      .photos-screen-inner { padding-left: var(--sp-3); padding-right: var(--sp-3); }
+
+      /* The upload modal is the first thing a phone user sees. #upload-screen is
+         a flex item, so its default min-width:auto pins it to the min-content
+         width of the instructions (~440px) and pushes the page sideways.
+         min-width:0 lets it shrink; the rest keeps the content readable once it does. */
+      .upload-modal-backdrop { padding: 0; align-items: flex-start; }
+      #upload-screen { min-width: 0; width: 100%; max-width: 100%; }
+      .upload-modal-inner {
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
+        padding: var(--sp-4) var(--sp-3);
+        border-radius: 0;
+        overflow-wrap: anywhere;
+      }
+      .upload-instructions { max-width: 100%; padding: var(--sp-4) var(--sp-3); }
+      .upload-modal-inner ol,
+      .upload-modal-inner ul { padding-left: 1.1em; }
+      /* Beats the !important 2-column rule set for desktop further up. */
+      .bs-upload-zones { grid-template-columns: 1fr !important; }
+
+      /* One chart per row. !important is required, not lazy: two of the cards
+         carry an inline `grid-column: span 2`, which outranks any stylesheet
+         rule. Left alone, the grid invents a second implicit column to satisfy
+         the span and squeezes Personal Records down to 42px. */
+      .charts-row { grid-template-columns: 1fr !important; padding: var(--sp-3); }
+      .charts-row .chart-card {
+        grid-column: 1 / -1 !important;
+        /* Wide content (the year-long activity calendar) scrolls inside its own
+           card instead of widening the page. */
+        overflow-x: auto;
+      }
+    }
+
+    /* Short viewports — chiefly a phone held in landscape, where the width
+       breakpoint above doesn't apply but there are only ~340px of height. The
+       400px map floor would otherwise be taller than the whole screen. */
+    @media (max-height: 520px) {
+      #view-map #heatmap-container { height: 70vh; height: 70dvh; min-height: 180px; }
+      #app-nav { padding-top: 4px; padding-bottom: 4px; }
+    }
+
+    /* Touch devices: Apple's HIG minimum is 44×44pt. These controls were
+       22–29px tall, which is a coin-flip tap on a phone. Scoped to coarse
+       pointers so the desktop layout keeps its tighter density. */
+    @media (pointer: coarse) {
+      .nav-tab,
+      .etab,
+      .tl-btn,
+      .bs-btn,
+      .unit-toggle button,
+      #btn-clear-filters { min-height: 44px; }
+
+      .unit-toggle button { min-width: 44px; }
+
+      .filter-row select,
+      .filter-row input[type="date"],
+      .filter-row input[type="search"] {
+        min-height: 44px;
+        /* ≥16px is the threshold below which iOS Safari zooms the page in when
+           a field takes focus — and it never zooms back out. */
+        font-size: 16px;
+      }
+
+      .filter-row input[type="checkbox"] { width: 22px; height: 22px; }
+      /* The checkbox itself stays small; its label carries the 44px target. */
+      .dup-filter-label { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; }
+      #btn-clear-filters { min-width: 44px; }
+
+      /* Kill the 300ms double-tap-zoom delay on controls. */
+      button, .nav-tab, .etab, .loc-row, .activity-row, .record-row-clickable {
+        touch-action: manipulation;
+      }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
        B3 — COMPONENT PASS
        Applied as an override layer on top of the structural CSS above
        (same class names, later in source order + often more specific
@@ -1687,7 +1842,7 @@
       <button id="btn-metric">km</button>
       <button id="btn-imperial" class="active">mi</button>
     </div>
-    <button class="bs-btn bs-btn-secondary" id="btn-open-upload" style="font-size:12px; padding:6px 14px;">&#128194; Upload data</button>
+    <button class="bs-btn bs-btn-secondary" id="btn-open-upload" style="font-size:12px; padding:6px 14px;" aria-label="Upload data">&#128194;<span class="nav-btn-label"> Upload data</span></button>
     <button class="tl-btn" id="btn-theme-toggle" style="font-size:12px;">🌙</button>
   </div>
 </nav>
@@ -1722,7 +1877,10 @@
 
         <!-- Strava -->
         <div class="bs-upload-zone" id="zone-strava" data-source="strava">
-          <input type="file" id="file-strava" accept=".zip,.csv,.gpx" style="display:none" multiple aria-label="Choose Strava export file" />
+          <!-- MIME types alongside the extensions: the iOS Files picker resolves
+               `accept` to UTIs and greys out ZIPs when given bare extensions.
+               application/octet-stream is the catch-all iOS falls back to. -->
+          <input type="file" id="file-strava" accept=".zip,.csv,.gpx,application/zip,application/x-zip-compressed,text/csv,application/octet-stream" style="display:none" multiple aria-label="Choose Strava export file" />
           <div class="bs-upload-icon">&#129984;</div>
           <div class="bs-upload-name">Strava</div>
           <label for="file-strava" class="upload-choose-btn" id="sub-strava">Choose ZIP file</label>
@@ -1743,7 +1901,7 @@
 
         <!-- Apple Health -->
         <div class="bs-upload-zone" id="zone-apple" data-source="apple">
-          <input type="file" id="file-apple" accept=".zip,.xml" style="display:none" multiple aria-label="Choose Apple Health export file" />
+          <input type="file" id="file-apple" accept=".zip,.xml,application/zip,application/x-zip-compressed,text/xml,application/xml,application/octet-stream" style="display:none" multiple aria-label="Choose Apple Health export file" />
           <div class="bs-upload-icon">&#127822;</div>
           <div class="bs-upload-name">Apple Watch</div>
           <label for="file-apple" class="upload-choose-btn" id="sub-apple">Choose file</label>
