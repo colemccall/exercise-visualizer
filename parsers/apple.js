@@ -257,24 +257,14 @@ export async function parse(file, onProgress = () => {}) {
         }
       }
 
-      // Also try matching by date if no explicit path found
-      if (!activity.has_route) {
-        const dateStr = activity.date.toISOString().slice(0, 10); // YYYY-MM-DD
-        const routeEntry = Object.values(zip.files).find(f =>
-          !f.dir &&
-          f.name.toLowerCase().endsWith('.gpx') &&
-          f.name.includes('workout-routes') &&
-          f.name.includes(dateStr)
-        );
-        if (routeEntry) {
-          activity.has_route = true;
-          activity.gpx_file = routeEntry.name;
-          activity._gpxLoader = async () => {
-            const text = await routeEntry.async('string');
-            return parseGPX(text);
-          };
-        }
-      }
+      // NOTE: there is deliberately no "match a route by date" fallback here.
+      // Route filenames are stamped with the workout's *creation* date in local
+      // time, so matching them against a workout's UTC calendar day picks the
+      // wrong file — and it only ever fires for workouts that genuinely have no
+      // route (yoga, strength training, indoor cardio), handing them some other
+      // workout's GPS trace. Across all three real exports every route in the
+      // ZIP was already resolved by FileReference above (330/330, 332/332,
+      // 435/435), so the fallback contributed nothing but false positives.
 
       activities.push(activity);
 

@@ -53,6 +53,53 @@ function parseDuration(str) {
   return 0;
 }
 
+// ── Date parsing ──────────────────────────────────────────────────────────────
+const MONTHS = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+};
+
+/**
+ * Parse Strava's "Activity Date" column.
+ *
+ * Strava writes this as "Apr 22, 2026, 3:14:03 AM" with **no timezone marker**,
+ * and the value is UTC — verified against the Z-suffixed <time> of the first
+ * trackpoint in the matching GPX, which agrees to the second. Handing that
+ * string to `new Date()` makes the engine read it as *local* time, shifting
+ * every activity by the viewer's UTC offset — enough to push late-evening
+ * workouts onto the next day and to break cross-source dedup, which only
+ * pairs activities within 10 minutes of each other.
+ *
+ * @param {string} raw
+ * @returns {Date|null}
+ */
+function parseStravaDate(raw) {
+  if (!raw) return null;
+  const str = String(raw).trim();
+
+  const m = str.match(
+    /^([A-Za-z]{3,})\s+(\d{1,2}),\s*(\d{4}),\s*(\d{1,2}):(\d{2}):(\d{2})(?:\s*([AP])\.?M\.?)?$/i
+  );
+  if (m) {
+    const month = MONTHS[m[1].slice(0, 3).toLowerCase()];
+    if (month !== undefined) {
+      let hour = parseInt(m[4], 10);
+      const meridiem = m[7] ? m[7].toUpperCase() : null;
+      if (meridiem === 'A' && hour === 12) hour = 0;
+      else if (meridiem === 'P' && hour < 12) hour += 12;
+      return new Date(Date.UTC(
+        parseInt(m[3], 10), month, parseInt(m[2], 10),
+        hour, parseInt(m[5], 10), parseInt(m[6], 10)
+      ));
+    }
+  }
+
+  // Anything else (ISO 8601, explicit "UTC" suffix, older export formats) already
+  // carries its own zone information — let the engine handle it.
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 // ── CSV parsing (no external library) ────────────────────────────────────────
 /**
  * Parse CSV text into an array of objects keyed by the header row.
@@ -231,9 +278,9 @@ function rowToActivity(row) {
   // "Elapsed Time", "Distance", "Commute", "Filename", ...
   const id = row['Activity ID'] || row['id'] || String(Math.random());
   const rawDate = row['Activity Date'] || row['date'] || '';
-  const date = rawDate ? new Date(rawDate) : null;
+  const date = parseStravaDate(rawDate);
 
-  if (!date || isNaN(date.getTime())) return null;
+  if (!date) return null;
 
   const name = row['Activity Name'] || row['name'] || 'Strava Activity';
   const type = mapType(row['Activity Type'] || row['type'] || '');
