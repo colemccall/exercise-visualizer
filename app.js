@@ -34,10 +34,11 @@ import { renderDistanceChart }  from './charts/distance.js';
 import { renderWeeklyChart }    from './charts/weekly.js';
 import { renderHRZones }        from './charts/hr-zones.js';
 import { renderRecords }        from './charts/records.js';
+import { renderStats, renderStatsCompact } from './charts/stats.js';
 import { renderElevationChart, renderHRLineChart } from './charts/elevation.js';
 
 // ── Map imports ───────────────────────────────────────────────────────────────
-import { initHeatmap, renderHeatmap, setHeatmapTheme, routeStyle, styleColor, setHeatStyle, getHeatStyle, _renderedPolylines, _renderedActivities, TYPE_COLORS } from './map/heatmap.js';
+import { initHeatmap, renderHeatmap, setHeatmapTheme, routeStyle, styleColor, setHeatStyle, getHeatStyle, getFrequencyRamp, getFrequencyRange, raiseHotRoutes, _renderedPolylines, _renderedActivities, TYPE_COLORS } from './map/heatmap.js';
 import { renderRoute }                from './map/route.js';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -56,8 +57,13 @@ let photoBufferMinutes = 5;
 /** Latest match summary from matchPhotosToActivities */
 let photoMatchSummary = { matched: 0, unmatched: 0, activitiesWithPhotos: [] };
 
-/** @type {'metric'|'imperial'} */
-let units = localStorage.getItem('fitness-units') || 'imperial';
+/** @type {'metric'|'imperial'}
+ *  Miles are the default. A stored value only wins if the user actually
+ *  picked it: an older build wrote 'metric' into this key on load, so a
+ *  stored value without the explicit-choice flag is ignored. */
+let units = localStorage.getItem('fitness-units-explicit') === '1'
+  ? (localStorage.getItem('fitness-units') || 'imperial')
+  : 'imperial';
 
 /** Current filter state */
 const filters = {
@@ -412,6 +418,28 @@ function formatPace(distance_m, duration_s) {
   return `${m}:${String(s).padStart(2,'0')} /km`;
 }
 
+/** Speed reads better than pace for rides. */
+function formatSpeed(distance_m, duration_s) {
+  if (!distance_m || !duration_s) return '—';
+  const perHour = (distance_m / duration_s) * 3600;
+  return units === 'imperial'
+    ? `${(perHour / 1609.344).toFixed(1)} mph`
+    : `${(perHour / 1000).toFixed(1)} km/h`;
+}
+
+/** Formatters bundled for charts/stats.js, which has no unit state of its own. */
+function formatters() {
+  return {
+    units,
+    distance:   formatDistance,
+    elevation:  formatElevation,
+    movingTime: formatMovingTime,
+    duration:   formatDuration,
+    pace:       formatPace,
+    speed:      formatSpeed,
+  };
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // DASHBOARD RENDERING
 // ═════════════════════════════════════════════════════════════════════════════
@@ -480,6 +508,10 @@ function switchView(view) {
     // Leaflet needs to re-measure if the map view just became visible
     if (view === 'map') {
       setTimeout(() => { try { heatmapInstance?.invalidateSize(); } catch {} }, 100);
+    } else if (view === 'charts') {
+      // Same reason as the collapse handlers: charts drawn into a hidden view
+      // fall back to a placeholder width.
+      redrawCharts();
     }
   }
   window.scrollTo({ top: 0, behavior: 'auto' });
@@ -582,12 +614,64 @@ function refreshDashboard() {
 
   updateSourceBadges();
   updateStatsBar(filtered);
+  updateFiltersSummary(filtered);
   renderActivityList(filtered);
 
   try { renderCharts(filtered); } catch (e) { console.error('Chart error:', e); }
+  try { renderAllStats(filtered); } catch (e) { console.error('Stats error:', e); }
   try { renderMonthsTab(getFilteredBaseActivities()); } catch (e) { console.error('Month tab error:', e); }
 
   refreshHeatmap(filtered);
+}
+
+/** Full stats panel (Stats & Charts view) + compact strip (map explore panel). */
+function renderAllStats(filtered) {
+  const fmt = formatters();
+
+  const detail = document.getElementById('stats-detail');
+  if (detail) {
+    renderStats(detail, filtered, {
+      fmt,
+      typeColors: TYPE_COLORS,
+      onOpenActivity: (id) => {
+        const act = allActivities.find(a => a.id === id);
+        if (act) openDetail(act);
+      },
+    });
+  }
+
+  const compact = document.getElementById('etab-stats');
+  if (compact) {
+    renderStatsCompact(compact, filtered, {
+      fmt,
+      onSeeAll: () => {
+        switchView('charts');
+        setCollapsed('stats', false);
+        document.getElementById('panel-stats')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      },
+    });
+  }
+}
+
+/** One-line description of the active filters, shown in the panel header. */
+function updateFiltersSummary(filtered) {
+  const el = document.getElementById('filters-summary');
+  if (!el) return;
+
+  const parts = [];
+  if (filters.type !== 'All')  parts.push(filters.type);
+  if (filters.search)          parts.push(`“${filters.search}”`);
+  if (filters.month) {
+    const [y, m] = filters.month.split('-');
+    parts.push(new Date(+y, +m, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }));
+  }
+  if (filters.from)            parts.push(`from ${filters.from.toLocaleDateString('en-US')}`);
+  if (filters.to)              parts.push(`to ${filters.to.toLocaleDateString('en-US')}`);
+  if (filters.duplicatesOnly)  parts.push('duplicates only');
+
+  el.textContent = parts.length
+    ? `${parts.join(' · ')} — ${filtered.length.toLocaleString()} of ${allActivities.length.toLocaleString()} activities`
+    : `Showing all ${allActivities.length.toLocaleString()} activities`;
 }
 
 function updateSourceBadges() {
@@ -675,11 +759,17 @@ function renderActivityList(activities) {
   list.appendChild(frag);
 }
 
+/** Re-draw the D3 charts at their real container width. */
+function redrawCharts() {
+  if (allActivities.length === 0) return;
+  try { renderCharts(getFilteredActivities()); } catch (e) { console.error('Chart error:', e); }
+}
+
 function renderCharts(activities) {
   const sorted = [...activities].sort((a, b) => a.date - b.date);
 
   renderDistanceChart(sorted, document.getElementById('chart-distance'), units);
-  renderWeeklyChart(activities, document.getElementById('chart-weekly'));
+  renderWeeklyChart(activities, document.getElementById('chart-weekly'), units);
   renderRecords(activities, document.getElementById('chart-records'), units, openDetail);
 
   // HR zones — only show if we have HR data
@@ -694,9 +784,165 @@ function renderCharts(activities) {
   }
 }
 
-// ── Explore panel (Locations / By Month / Timelapse tabs) ─────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// COLLAPSIBLE PANELS
+//
+// Any element carrying `data-collapse="<key>"` is a toggle; the section it
+// collapses is its closest .panel / .chart-card / #explore-panel ancestor, which
+// gets the `collapsed` class (CSS hides that section's .collapsible-body).
+// State is keyed by <key> in localStorage so a layout you set up survives a
+// reload — the point of collapsing is usually "leave the map big".
+// ═════════════════════════════════════════════════════════════════════════════
 
-let _exploreActiveTab = 'locations';
+const COLLAPSE_PREFIX = 'fitness-collapsed:';
+
+function collapseSectionFor(toggle) {
+  return toggle.closest('.panel, .chart-card, #explore-panel');
+}
+
+function isCollapsed(key) {
+  return localStorage.getItem(COLLAPSE_PREFIX + key) === '1';
+}
+
+function setCollapsed(key, collapsed) {
+  const toggle = document.querySelector(`[data-collapse="${key}"]`);
+  if (!toggle) return;
+  const section = collapseSectionFor(toggle);
+  if (!section) return;
+
+  section.classList.toggle('collapsed', collapsed);
+  toggle.setAttribute('aria-expanded', String(!collapsed));
+  localStorage.setItem(COLLAPSE_PREFIX + key, collapsed ? '1' : '0');
+
+  // Charts measured 0px wide while their section was hidden.
+  if (!collapsed && key === 'charts') redrawCharts();
+
+  const label = toggle.querySelector('.panel-toggle-label');
+  if (label) label.textContent = collapsed ? 'Show panel' : 'Hide panel';
+
+  // Leaflet measures on layout; collapsing the explore panel resizes the map.
+  if (section.id === 'explore-panel') {
+    setTimeout(() => { try { heatmapInstance?.invalidateSize(); } catch {} }, 60);
+  }
+}
+
+function initCollapsibles() {
+  document.querySelectorAll('[data-collapse]').forEach(toggle => {
+    const key = toggle.dataset.collapse;
+    setCollapsed(key, isCollapsed(key));
+    toggle.addEventListener('click', () => {
+      setCollapsed(key, !collapseSectionFor(toggle)?.classList.contains('collapsed'));
+    });
+  });
+
+  // Chart cards collapse from their own title, keyed by the chart's id.
+  document.querySelectorAll('.chart-card .card-toggle').forEach(btn => {
+    const card = btn.closest('.chart-card');
+    const key  = `card-${card.querySelector('[id^="chart-"]')?.id || card.id}`;
+    const collapsed = isCollapsed(key);
+    card.classList.toggle('collapsed', collapsed);
+    btn.setAttribute('aria-expanded', String(!collapsed));
+    btn.addEventListener('click', () => {
+      const next = !card.classList.contains('collapsed');
+      card.classList.toggle('collapsed', next);
+      btn.setAttribute('aria-expanded', String(!next));
+      localStorage.setItem(COLLAPSE_PREFIX + key, next ? '1' : '0');
+      // D3 sizes to the container, which measured 0 while collapsed.
+      if (!next) redrawCharts();
+    });
+  });
+
+  // "Collapse all" / "Expand all" for the Stats & Charts view
+  const allBtn = document.getElementById('btn-collapse-all');
+  allBtn?.addEventListener('click', () => {
+    const panels = ['stats', 'filters', 'activities', 'charts'];
+    const anyOpen = panels.some(k => !isCollapsed(k));
+    panels.forEach(k => setCollapsed(k, anyOpen));
+    allBtn.textContent = anyOpen ? 'Expand all sections' : 'Collapse all sections';
+  });
+  if (allBtn) {
+    const anyOpen = ['stats', 'filters', 'activities', 'charts'].some(k => !isCollapsed(k));
+    allBtn.textContent = anyOpen ? 'Collapse all sections' : 'Expand all sections';
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// FULL-SCREEN MAP
+// The nav stays put; the map grows to the rest of the viewport and the explore
+// panel steps aside. --nav-h is measured rather than hard-coded because the nav
+// wraps to two rows under 700px.
+// ═════════════════════════════════════════════════════════════════════════════
+
+function syncNavHeight() {
+  const nav = document.getElementById('app-nav');
+  if (nav) document.body.style.setProperty('--nav-h', `${nav.offsetHeight}px`);
+}
+
+function setMapFullscreen(on) {
+  document.body.classList.toggle('map-fullscreen', on);
+  // Measure after the class lands: full-screen mode drops the brand from the
+  // nav on narrow screens, so the nav is a different height than it just was.
+  requestAnimationFrame(syncNavHeight);
+
+  const btn = document.getElementById('btn-map-fullscreen');
+  if (btn) {
+    btn.setAttribute('aria-pressed', String(on));
+    btn.querySelector('.map-icon-label').textContent = on ? 'Exit full map' : 'Expand map';
+    btn.title = on ? 'Back to the normal layout (Esc)' : 'Fill the screen with the map (F, or Esc to exit)';
+  }
+
+  if (on) window.scrollTo({ top: 0, behavior: 'auto' });
+  setTimeout(() => { try { heatmapInstance?.invalidateSize(); } catch {} }, 80);
+}
+
+function toggleMapFullscreen() {
+  setMapFullscreen(!document.body.classList.contains('map-fullscreen'));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// MAP LEGENDS
+// ═════════════════════════════════════════════════════════════════════════════
+
+function renderMapLegend() {
+  const freqMode  = getHeatStyle() === 'frequency';
+  const typeEl    = document.getElementById('map-legend-type');
+  const freqEl    = document.getElementById('map-legend-freq');
+  if (!typeEl || !freqEl) return;
+
+  // Nothing drawn yet — a legend for an empty map is just noise.
+  if (_renderedActivities.length === 0) {
+    typeEl.hidden = true;
+    freqEl.hidden = true;
+    return;
+  }
+
+  typeEl.hidden = freqMode;
+  freqEl.hidden = !freqMode;
+
+  if (freqMode) {
+    const ramp = getFrequencyRamp(_darkMode);
+    document.getElementById('map-legend-ramp').style.background =
+      `linear-gradient(90deg, ${ramp.join(', ')})`;
+    const { min, max } = getFrequencyRange();
+    document.getElementById('map-legend-min').textContent = `${min} visit${min === 1 ? '' : 's'}`;
+    document.getElementById('map-legend-max').textContent = `${max} visits`;
+    return;
+  }
+
+  // Only list the types actually on the map, so the legend stays honest.
+  const present = [...new Set(_renderedActivities.map(a => a.type))];
+  const order   = ['Run', 'Ride', 'Walk', 'Hike', 'Swim', 'Other'];
+  const items   = order.filter(t => present.includes(t));
+  const container = document.getElementById('map-legend-type-items');
+  container.innerHTML = (items.length ? items : order).map(t => `
+    <span class="map-legend-item">
+      <span class="map-legend-swatch" style="background:${TYPE_COLORS[t] || TYPE_COLORS.Other}"></span>${t}
+    </span>`).join('');
+}
+
+// ── Explore panel (Stats / Locations / By Month / Timelapse tabs) ─────────────
+
+let _exploreActiveTab = 'stats';
 let _monthFilter = null; // 'YYYY-M' or null
 
 function initExplorePanel() {
@@ -808,6 +1054,7 @@ async function refreshHeatmap(filtered) {
 
   // Apply month/filter dimming to already-rendered polylines
   applyHeatmapFilter(filtered);
+  renderMapLegend();
 }
 
 let _lastHeatmapCount = 0;
@@ -823,11 +1070,14 @@ function applyHeatmapFilter(filtered) {
     if (!poly || !act) continue;
     const color = styleColor(act, _darkMode);
     if (!hasFilter || filteredIds.has(act.id)) {
-      poly.setStyle({ color, ...routeStyle(_darkMode) });
+      poly.setStyle({ color, ...routeStyle(_darkMode, act) });
     } else {
       poly.setStyle({ color, weight: 1, opacity: 0.07 });
     }
   }
+
+  raiseHotRoutes();
+  renderMapLegend();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -947,9 +1197,12 @@ function showToast(message, duration = 3000) {
 // UNIT TOGGLE
 // ═════════════════════════════════════════════════════════════════════════════
 
-function setUnits(newUnits) {
+function setUnits(newUnits, explicit = true) {
   units = newUnits;
   localStorage.setItem('fitness-units', units);
+  // Only a click on the km/mi toggle counts as a choice; applying the stored
+  // value at startup must not silently promote the default into a preference.
+  if (explicit) localStorage.setItem('fitness-units-explicit', '1');
 
   document.getElementById('btn-metric').classList.toggle('active', units === 'metric');
   document.getElementById('btn-imperial').classList.toggle('active', units === 'imperial');
@@ -1012,8 +1265,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Unit toggle
   document.getElementById('btn-metric').addEventListener('click',   () => setUnits('metric'));
   document.getElementById('btn-imperial').addEventListener('click', () => setUnits('imperial'));
-  // Apply stored units
-  setUnits(units);
+  // Apply stored units (not an explicit choice — see setUnits)
+  setUnits(units, false);
 
   // (Legacy: "New Upload" button is now the top-nav "Upload data" button)
 
@@ -1030,12 +1283,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('filter-from').addEventListener('change', (e) => {
-    filters.from = e.target.value ? new Date(e.target.value) : null;
+    filters.from = parseDateInput(e.target.value);
     refreshDashboard();
   });
 
   document.getElementById('filter-to').addEventListener('change', (e) => {
-    filters.to = e.target.value ? new Date(e.target.value) : null;
+    filters.to = parseDateInput(e.target.value);
     refreshDashboard();
   });
 
@@ -1063,10 +1316,27 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.target === document.getElementById('detail-overlay')) closeDetail();
   });
 
-  // Keyboard close
+  // Keyboard: Esc closes the detail panel (or leaves the full-screen map),
+  // F toggles the full-screen map when no text field has focus.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeDetail();
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '');
+    if (e.key === 'Escape') {
+      if (document.getElementById('detail-overlay')?.classList.contains('open')) closeDetail();
+      else if (document.body.classList.contains('map-fullscreen')) setMapFullscreen(false);
+      else closeDetail();
+    } else if ((e.key === 'f' || e.key === 'F') && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (document.querySelector('.nav-tab.active')?.dataset.view === 'map') {
+        e.preventDefault();
+        toggleMapFullscreen();
+      }
+    }
   });
+
+  // Collapsible panels + full-screen map
+  initCollapsibles();
+  syncNavHeight();
+  window.addEventListener('resize', syncNavHeight);
+  document.getElementById('btn-map-fullscreen')?.addEventListener('click', toggleMapFullscreen);
 
   // Dark/light mode
   applyTheme();
@@ -1093,7 +1363,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('.hm-style-btn').forEach(b =>
         b.classList.toggle('active', b === btn)
       );
-      applyHeatmapFilter(getFilteredActivities());
+      applyHeatmapFilter(getFilteredActivities()); // also refreshes the legend
     });
   });
 
@@ -1110,6 +1380,18 @@ function dupBadge(activity) {
     : null;
   const label = other ? `⚠ Also in ${other.source}` : '⚠ Duplicate';
   return `<span class="duplicate-badge" title="This activity appears in multiple sources">${label}</span>`;
+}
+
+/**
+ * Parse a date input's "YYYY-MM-DD" as local midnight.
+ * `new Date('2024-01-01')` is parsed as *UTC* midnight, so west of Greenwich
+ * the filter (and the summary line that echoes it) lands a day early.
+ */
+function parseDateInput(value) {
+  if (!value) return null;
+  const [y, m, d] = value.split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
 }
 
 function escapeHtml(str) {
@@ -1172,7 +1454,7 @@ function tlStep() {
   // Flash in bright, then settle to normal visible opacity
   poly.setStyle({ color: '#ffffff', weight: 4, opacity: 1 });
   setTimeout(() => {
-    poly.setStyle({ color, ...routeStyle(_darkMode) });
+    poly.setStyle({ color, ...routeStyle(_darkMode, act) });
   }, 300);
 
   tlUpdateUI(tlIdx);
@@ -1247,7 +1529,7 @@ export function tlStop() {
   for (let i = 0; i < _renderedPolylines.length; i++) {
     const act = _renderedActivities[i];
     if (!act) continue;
-    _renderedPolylines[i]?.setStyle({ color: styleColor(act, _darkMode), ...routeStyle(_darkMode) });
+    _renderedPolylines[i]?.setStyle({ color: styleColor(act, _darkMode), ...routeStyle(_darkMode, act) });
   }
 }
 
@@ -1416,4 +1698,5 @@ function toggleTheme() {
   localStorage.setItem('fitness-theme', _darkMode ? 'dark' : 'light');
   applyTheme();
   setHeatmapTheme(_darkMode);
+  renderMapLegend();
 }

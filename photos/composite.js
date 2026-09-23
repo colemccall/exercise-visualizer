@@ -18,11 +18,11 @@ const DEFAULT_SIZE = { w: 720, h: 1280 };
 const MAP_MARGIN = 24;
 const PHOTO_MARGIN = 20;
 
-// CartoDB "positron" style — light neutral tiles, CORS-enabled, appropriate
-// for our aesthetic. Attribution required if we display long-form (skipped
-// in social exports since caption bar covers copyright; still safer to
-// include a tiny credit).
-const TILE_URL = 'https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
+// Esri's light gray canvas — neutral tiles, CORS-enabled, and keyless.
+// (Not CartoDB positron any more: basemaps.cartocdn.com now stamps
+// "API KEY REQUIRED" across tiles requested without a key, which ended up
+// baked into exported video frames.) Note Esri's path order is {z}/{y}/{x}.
+const TILE_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}';
 const TILE_SIZE = 256;
 
 /**

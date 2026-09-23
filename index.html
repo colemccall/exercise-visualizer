@@ -1821,6 +1821,410 @@
     .app-fitness .record-row-clickable:hover {
       background: var(--accent-quiet);
     }
+
+    /* ═══════════════════════════════════════════════════════════════
+       COLLAPSIBLE PANELS
+       Every heavy block on the Stats view — and the map's explore
+       panel — folds away so the remaining content (usually the map)
+       can have the room. Open/closed state persists per panel in
+       localStorage; see initCollapsibles() in app.js.
+       ═══════════════════════════════════════════════════════════════ */
+    .panel { border-bottom: 1px solid var(--border); }
+    .panel-head { margin: 0; }
+    .panel-head-btn {
+      display: flex;
+      align-items: baseline;
+      gap: var(--sp-3);
+      width: 100%;
+      padding: var(--sp-3) var(--sp-6);
+      background: var(--surface);
+      border: none;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      text-align: left;
+      font-family: var(--font-body);
+      transition: background 0.12s;
+    }
+    .panel-head-btn:hover { background: var(--accent-quiet); }
+    .panel-head-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .panel-title {
+      font-family: var(--font-display);
+      font-size: var(--fz-display-2, 18px);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text);
+    }
+    .panel-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .panel-chevron {
+      display: inline-block;
+      font-size: 11px;
+      color: var(--text-mid);
+      transition: transform 0.15s ease;
+      transform-origin: 50% 55%;
+    }
+    .collapsed > .collapsible-body,
+    .panel.collapsed .collapsible-body { display: none; }
+    .panel.collapsed .panel-chevron,
+    .chart-card.collapsed .panel-chevron,
+    #explore-panel.collapsed .panel-chevron { transform: rotate(-90deg); }
+    .panel.collapsed .panel-head-btn { border-bottom: none; }
+
+    /* Chart cards collapse individually from their title */
+    .chart-card .chart-title.card-toggle {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-2);
+      width: 100%;
+      background: none;
+      border: none;
+      padding: 0 0 var(--sp-3);
+      cursor: pointer;
+      font-family: var(--font-display);
+      text-align: left;
+      color: var(--text);
+    }
+    .chart-card .chart-title.card-toggle:hover { color: var(--accent); }
+    .chart-card.collapsed .chart-title.card-toggle { padding-bottom: 0; }
+
+    /* Explore panel header row + collapse control */
+    .explore-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--sp-2);
+      flex-wrap: wrap;
+      padding-right: var(--sp-3);
+    }
+    .panel-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 12px;
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-mid);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .panel-toggle:hover { color: var(--accent); border-color: var(--accent); }
+    #explore-panel.collapsed .collapsible-body { display: none; }
+
+    .view-intro {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-4);
+      justify-content: space-between;
+      flex-wrap: wrap;
+      padding: var(--sp-3) var(--sp-6);
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .view-intro-text { font-size: 13px; color: var(--text-mid); max-width: 720px; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       STATS PANEL
+       ═══════════════════════════════════════════════════════════════ */
+    .panel-body { padding: var(--sp-5) var(--sp-6) var(--sp-6); }
+    .stats-empty { color: var(--text-muted); font-size: 13px; padding: var(--sp-4) 0; }
+
+    .stat-group + .stat-group { margin-top: var(--sp-6); }
+    .stat-group-head {
+      display: flex;
+      align-items: baseline;
+      gap: var(--sp-3);
+      flex-wrap: wrap;
+      margin-bottom: var(--sp-3);
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .stat-group-title {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text);
+    }
+    .stat-group-blurb { font-size: 12px; color: var(--text-muted); }
+
+    .stat-tiles {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: var(--sp-3);
+    }
+    .stat-tile {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: var(--elev-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: var(--sp-3) var(--sp-4);
+      font-family: var(--font-body);
+    }
+    .stat-tile-val {
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: 0.02em;
+      line-height: 1.15;
+    }
+    .stat-tile-lbl {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-mid);
+      margin-top: 4px;
+    }
+    .stat-tile-hint {
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .stat-tile.clickable { cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+    .stat-tile.clickable:hover { border-color: var(--accent); background: var(--accent-quiet); }
+    .stat-tile.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .stat-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      color: var(--text);
+    }
+    .stat-table th {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      text-align: left;
+      padding: 4px 8px 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .stat-table td {
+      padding: 8px 8px 8px 0;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    .stat-table-bar-col { width: 30%; min-width: 90px; }
+    .stat-type-dot {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      margin-right: 8px;
+      vertical-align: baseline;
+    }
+    .stat-bar {
+      display: block;
+      height: 8px;
+      width: 100%;
+      background: var(--surface-2);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .stat-bar-fill { display: block; height: 100%; border-radius: 999px; }
+
+    /* Compact stats — map explore panel */
+    .compact-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px var(--sp-3);
+    }
+    .compact-stat {
+      display: flex;
+      flex-direction: column;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .compact-stat-lbl {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-muted);
+    }
+    .compact-stat-val {
+      font-family: var(--font-display);
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .compact-stats-more {
+      margin-top: var(--sp-3);
+      width: 100%;
+      padding: 7px 10px;
+      background: transparent;
+      border: 1px solid var(--border-mid);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-mid);
+      cursor: pointer;
+    }
+    .compact-stats-more:hover { color: var(--accent); border-color: var(--accent); }
+
+    /* ═══════════════════════════════════════════════════════════════
+       MAP CONTROLS, LEGENDS, FULL-SCREEN MAP
+       ═══════════════════════════════════════════════════════════════ */
+
+    /* Dark mode gets a dark basemap by inverting the tile pane rather than
+       loading a second provider: one tileset, consistent at every zoom, and
+       no API key. Only the tiles are filtered — routes live in the overlay
+       pane and keep their real colours. */
+    html.dark-mode .leaflet-tile-pane {
+      filter: invert(1) hue-rotate(180deg) brightness(0.88) contrast(0.92) saturate(0.7);
+    }
+    html.dark-mode .leaflet-control-attribution {
+      background: rgba(11, 12, 16, 0.82) !important;
+      color: var(--text-muted);
+    }
+    html.dark-mode .leaflet-control-attribution a { color: var(--accent); }
+    html.dark-mode .leaflet-bar a {
+      background: var(--surface-raised);
+      color: var(--text);
+      border-bottom-color: var(--border);
+    }
+    html.dark-mode .leaflet-bar a:hover { background: var(--surface-2); color: var(--accent); }
+    .map-controls {
+      position: absolute;
+      top: 12px; right: 12px;
+      z-index: 500;
+      display: flex;
+      gap: var(--sp-2);
+      align-items: flex-start;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .heatmap-style-toggle { position: static; top: auto; right: auto; }
+    .map-icon-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface-raised, var(--surface));
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      box-shadow: var(--shadow-elev2, 0 2px 6px rgba(0,0,0,0.12));
+      padding: 6px 10px;
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-mid);
+      cursor: pointer;
+    }
+    .map-icon-btn:hover { color: var(--accent); border-color: var(--accent); }
+    .map-icon-glyph { font-size: 13px; line-height: 1; }
+
+    .map-legend {
+      position: absolute;
+      left: 12px; bottom: 24px;
+      z-index: 500;
+      background: var(--surface-raised, var(--surface));
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      box-shadow: var(--shadow-elev2, 0 2px 6px rgba(0,0,0,0.12));
+      padding: 8px 10px;
+      max-width: 220px;
+    }
+    .map-legend[hidden] { display: none; }
+    .map-legend-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .map-legend-items { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+    .map-legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: var(--text-mid);
+    }
+    .map-legend-swatch { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+    .map-legend-ramp { height: 8px; border-radius: 999px; }
+    .map-legend-scale {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Full-screen map: nav stays, everything else on the page gives way.
+       --nav-h is measured in JS because the nav wraps to two rows on
+       narrow viewports. */
+    body.map-fullscreen { overflow: hidden; }
+    body.map-fullscreen #view-map #heatmap-container {
+      height: calc(100vh - var(--nav-h, 56px));
+      height: calc(100dvh - var(--nav-h, 56px));
+    }
+    body.map-fullscreen #explore-panel,
+    body.map-fullscreen #duplicate-banner { display: none !important; }
+    body.map-fullscreen #heatmap-explore-wrapper { border: none; }
+
+    /* ── Narrow viewports ── */
+    @media (max-width: 760px) {
+      .panel-head-btn { flex-wrap: wrap; gap: 6px var(--sp-2); padding: var(--sp-3) var(--sp-4); }
+      .panel-sub { flex-basis: 100%; white-space: normal; }
+      .panel-body { padding: var(--sp-4); }
+      .stat-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+      .stat-tile-val { font-size: 20px; }
+      .view-intro { padding: var(--sp-3) var(--sp-4); }
+      .stat-table { font-size: 12px; }
+      .stat-table-bar-col { display: none; }
+      /* A two-row nav costs ~20% of a phone screen; full-screen map drops the
+         brand so the nav collapses to a single row of controls. */
+      body.map-fullscreen .nav-brand { display: none; }
+
+      .map-legend { max-width: 150px; bottom: 14px; padding: 6px 8px; }
+      .map-legend-title { font-size: 9px; margin-bottom: 4px; }
+      .map-legend-items { gap: 2px 8px; }
+      .map-legend-item { font-size: 10px; }
+      .map-icon-label { display: none; }
+      .compact-stats { grid-template-columns: 1fr 1fr; }
+
+      /* Four tabs plus the collapse button don't fit on one 390px row. The
+         strip is `flex-shrink: 0` for the desktop column layout, which left
+         the last tab hanging off the clipped edge of the panel. */
+      .app-fitness .explore-tabs {
+        flex-wrap: wrap;
+        width: auto;
+        max-width: 100%;
+        flex-shrink: 1;
+        min-width: 0;
+      }
+      .explore-head { padding-right: var(--sp-3); gap: var(--sp-2); }
+    }
+    @media (pointer: coarse) {
+      .panel-toggle, .map-icon-btn { min-height: 44px; }
+      .panel-head-btn { min-height: 48px; }
+      .chart-card .chart-title.card-toggle { min-height: 44px; }
+    }
   </style>
 </head>
 <body class="app-fitness">
@@ -1832,7 +2236,7 @@
   <div class="nav-brand">&#127939; Fitness Visualizer</div>
   <div class="nav-tabs" role="tablist">
     <button class="nav-tab active" data-view="map" role="tab">Map</button>
-    <button class="nav-tab" data-view="charts" role="tab">Charts</button>
+    <button class="nav-tab" data-view="charts" role="tab">Stats &amp; Charts</button>
     <button class="nav-tab" data-view="photos" role="tab" id="nav-tab-photos">
       Photos <span class="nav-badge" id="nav-photos-badge" hidden></span>
     </button>
@@ -1990,21 +2394,57 @@
     <div id="heatmap-explore-wrapper">
       <div id="heatmap-container">
         <div id="heatmap"></div>
-        <div class="heatmap-style-toggle" role="group" aria-label="Route color style">
-          <button type="button" class="hm-style-btn active" data-style="type">By type</button>
-          <button type="button" class="hm-style-btn" data-style="frequency">Frequency</button>
+        <div class="map-controls">
+          <div class="heatmap-style-toggle" role="group" aria-label="Route color style">
+            <button type="button" class="hm-style-btn active" data-style="type">By type</button>
+            <button type="button" class="hm-style-btn" data-style="frequency">Frequency</button>
+          </div>
+          <button type="button" class="map-icon-btn" id="btn-map-fullscreen"
+                  aria-pressed="false" title="Fill the screen with the map (F, or Esc to exit)">
+            <span class="map-icon-glyph" aria-hidden="true">&#9974;</span><span class="map-icon-label">Expand map</span>
+          </button>
+        </div>
+
+        <!-- Legends — one per heat style -->
+        <div class="map-legend" id="map-legend-type">
+          <div class="map-legend-title">Activity type</div>
+          <div class="map-legend-items" id="map-legend-type-items"><!-- built by JS --></div>
+        </div>
+        <div class="map-legend" id="map-legend-freq" hidden>
+          <div class="map-legend-title">How often you go there</div>
+          <div class="map-legend-ramp" id="map-legend-ramp"></div>
+          <div class="map-legend-scale">
+            <span id="map-legend-min">rare</span>
+            <span id="map-legend-max">frequent</span>
+          </div>
         </div>
       </div>
 
       <div id="explore-panel">
-        <div class="explore-tabs">
-          <button class="etab active" data-tab="locations">Locations</button>
-          <button class="etab" data-tab="months">By Month</button>
-          <button class="etab" data-tab="timelapse">Timelapse</button>
+        <div class="explore-head">
+          <div class="explore-tabs">
+            <button class="etab active" data-tab="stats">Stats</button>
+            <button class="etab" data-tab="locations">Locations</button>
+            <button class="etab" data-tab="months">By Month</button>
+            <button class="etab" data-tab="timelapse">Timelapse</button>
+          </div>
+          <button type="button" class="panel-toggle" id="btn-explore-collapse"
+                  data-collapse="explore" aria-expanded="true"
+                  title="Hide this panel and give the map the space">
+            <span class="panel-chevron" aria-hidden="true">&#9662;</span>
+            <span class="panel-toggle-label">Hide panel</span>
+          </button>
+        </div>
+
+        <div class="collapsible-body" id="explore-panel-body">
+
+        <!-- Stats tab -->
+        <div class="etab-pane active" id="etab-stats">
+          <!-- populated by JS -->
         </div>
 
         <!-- Locations tab -->
-        <div class="etab-pane active" id="etab-locations">
+        <div class="etab-pane" id="etab-locations">
           <div id="locations-list" style="font-size:12px;color:var(--text-muted);">
             Load activities with GPS routes to see top locations.
           </div>
@@ -2035,15 +2475,26 @@
             <span id="tl-speed-val">3&times;</span>
           </div>
         </div>
+
+        </div><!-- /#explore-panel-body -->
       </div><!-- /#explore-panel -->
     </div><!-- /#heatmap-explore-wrapper -->
 
     </section><!-- /#view-map -->
 
-    <!-- ══════ CHARTS VIEW ══════ -->
+    <!-- ══════ STATS & CHARTS VIEW ══════ -->
     <section class="app-view" data-view="charts" id="view-charts">
 
-    <!-- Stats bar — 6 stats -->
+    <div class="view-intro">
+      <span class="view-intro-text">
+        Everything here describes the activities currently in view &mdash; change the filters
+        and every number, chart, and record updates with them.
+      </span>
+      <button type="button" class="bs-btn bs-btn-secondary view-intro-btn" id="btn-collapse-all"
+              style="font-size:12px;padding:6px 12px;">Collapse all sections</button>
+    </div>
+
+    <!-- Stats bar — 6 headline stats -->
     <div class="stats-bar">
       <div class="bs-stat">
         <div class="bs-stat-num" id="stat-total">&mdash;</div>
@@ -2071,6 +2522,28 @@
       </div>
     </div>
 
+    <!-- ── All statistics ── -->
+    <section class="panel" id="panel-stats" data-panel="stats">
+      <h2 class="panel-head">
+        <button type="button" class="panel-toggle panel-head-btn" data-collapse="stats" aria-expanded="true">
+          <span class="panel-chevron" aria-hidden="true">&#9662;</span>
+          <span class="panel-title">All statistics</span>
+          <span class="panel-sub">Volume, consistency, records, heart rate &amp; per-type breakdown</span>
+        </button>
+      </h2>
+      <div class="collapsible-body panel-body" id="stats-detail"></div>
+    </section>
+
+    <!-- ── Filters ── -->
+    <section class="panel" id="panel-filters" data-panel="filters">
+      <h2 class="panel-head">
+        <button type="button" class="panel-toggle panel-head-btn" data-collapse="filters" aria-expanded="true">
+          <span class="panel-chevron" aria-hidden="true">&#9662;</span>
+          <span class="panel-title">Filters</span>
+          <span class="panel-sub" id="filters-summary">Showing everything</span>
+        </button>
+      </h2>
+      <div class="collapsible-body">
     <!-- Filter row -->
     <div class="filter-row">
       <input type="search" id="filter-search" placeholder="Search activities&hellip;" style="flex:1;min-width:140px;max-width:260px;" />
@@ -2094,40 +2567,69 @@
       </label>
       <button class="bs-btn-ghost bs-btn" id="btn-clear-filters" style="font-size:12px;">Clear</button>
     </div>
+      </div><!-- /.collapsible-body -->
+    </section><!-- /#panel-filters -->
 
-    <!-- Activity list — full width -->
-    <div id="activity-list-container">
-      <div class="list-header">
-        <span>Recent Activities</span>
-        <span id="list-count-label" style="font-weight:400;"></span>
+    <!-- ── Activities ── -->
+    <section class="panel" id="panel-activities" data-panel="activities">
+      <h2 class="panel-head">
+        <button type="button" class="panel-toggle panel-head-btn" data-collapse="activities" aria-expanded="true">
+          <span class="panel-chevron" aria-hidden="true">&#9662;</span>
+          <span class="panel-title">Activities</span>
+          <span class="panel-sub" id="list-count-label">&nbsp;</span>
+        </button>
+      </h2>
+      <div class="collapsible-body">
+        <div id="activity-list-container">
+          <div id="activity-list"></div>
+        </div>
       </div>
-      <div id="activity-list"></div>
-    </div>
+    </section><!-- /#panel-activities -->
 
+    <!-- ── Charts ── -->
+    <section class="panel" id="panel-charts" data-panel="charts">
+      <h2 class="panel-head">
+        <button type="button" class="panel-toggle panel-head-btn" data-collapse="charts" aria-expanded="true">
+          <span class="panel-chevron" aria-hidden="true">&#9662;</span>
+          <span class="panel-title">Charts</span>
+          <span class="panel-sub">Each chart collapses on its own &mdash; click its title</span>
+        </button>
+      </h2>
+      <div class="collapsible-body">
     <!-- Charts row -->
     <div class="charts-row">
 
       <div class="chart-card" style="grid-column: span 2;">
-        <div class="chart-title">Monthly Distance</div>
-        <div id="chart-distance"></div>
+        <button type="button" class="chart-title card-toggle" aria-expanded="true">
+          <span class="panel-chevron" aria-hidden="true">&#9662;</span>Monthly Distance
+        </button>
+        <div class="collapsible-body"><div id="chart-distance"></div></div>
       </div>
 
       <div class="chart-card" style="grid-column: span 2;">
-        <div class="chart-title">Activity Calendar</div>
-        <div id="chart-weekly"></div>
+        <button type="button" class="chart-title card-toggle" aria-expanded="true">
+          <span class="panel-chevron" aria-hidden="true">&#9662;</span>Activity Calendar
+        </button>
+        <div class="collapsible-body"><div id="chart-weekly"></div></div>
       </div>
 
       <div class="chart-card">
-        <div class="chart-title">Personal Records</div>
-        <div id="chart-records"></div>
+        <button type="button" class="chart-title card-toggle" aria-expanded="true">
+          <span class="panel-chevron" aria-hidden="true">&#9662;</span>Personal Records
+        </button>
+        <div class="collapsible-body"><div id="chart-records"></div></div>
       </div>
 
       <div class="chart-card" id="chart-hr-card" style="display:none;">
-        <div class="chart-title">HR Zones</div>
-        <div id="chart-hr-zones"></div>
+        <button type="button" class="chart-title card-toggle" aria-expanded="true">
+          <span class="panel-chevron" aria-hidden="true">&#9662;</span>HR Zones
+        </button>
+        <div class="collapsible-body"><div id="chart-hr-zones"></div></div>
       </div>
 
     </div><!-- /.charts-row -->
+      </div><!-- /.collapsible-body -->
+    </section><!-- /#panel-charts -->
 
     </section><!-- /#view-charts -->
 

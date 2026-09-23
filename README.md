@@ -12,18 +12,22 @@ Your files never leave the browser. There is no server, no account, no cloud sto
 
 ### Navigation
 
-A persistent top bar with **Map / Charts / Photos** tabs — three sibling views instead of one long scroll. Upload is a modal (auto-opens on first visit, reachable anytime via "Upload data"). Two complete themes — light and dark are each independently designed and WCAG AA checked, not a token flip on top of one palette — with the activity-type colors (Run/Ride/Walk/Hike/Swim) using the colorblind-safe Okabe-Ito palette so every type stays distinguishable under the common forms of color blindness. See [design-system/fitness-theme.md](design-system/fitness-theme.md) for the full token reference.
+A persistent top bar with **Map / Stats & Charts / Photos** tabs — three sibling views instead of one long scroll. Upload is a modal (auto-opens on first visit, reachable anytime via "Upload data"). Two complete themes — light and dark are each independently designed and WCAG AA checked, not a token flip on top of one palette — with the activity-type colors (Run/Ride/Walk/Hike/Swim) using the colorblind-safe Okabe-Ito palette so every type stays distinguishable under the common forms of color blindness. See [design-system/fitness-theme.md](design-system/fitness-theme.md) for the full token reference.
 
 ### Map view
 
 - **Heatmap** of every GPS route with two styles:
   - *By type* — coloured per activity
-  - *Frequency* — every route drawn in one low-opacity colour so repeat paths visually darken
-- Locations / By Month / Timelapse controls below the map
+  - *Frequency* — each route coloured by how many separate activities share its path, on a sequential ramp with a legend giving the real visit counts. Your daily loop burns hot; a one-off route stays cool.
+- **Expand map** fills the screen with the map (or press <kbd>F</kbd>; <kbd>Esc</kbd> exits), and the panel below it collapses with **Hide panel** — the map takes the space either way
+- Stats / Locations / By Month / Timelapse tabs below the map, starting with a compact summary of the activities currently in view
+- Zooms to street level (z20 — individual buildings), and opens framed on the area you actually train in rather than zoomed out to fit one holiday abroad
 
-### Charts view
+### Stats & Charts view
 
-- Filter by type, date range, month, or free text
+- **All statistics** — around 30 derived numbers grouped into Volume, Consistency, Records and Heart, each with a one-line explanation of what it means, plus a per-activity-type breakdown table. Record cards are clickable and open that activity.
+- Every section (statistics, filters, activities, charts) collapses from its header, and each chart collapses from its title. What you collapse stays collapsed next visit.
+- Filter by type, date range, month, or free text — every number, chart and record on the page reflects the current filter
 - Deduplication flags the same activity recorded by multiple devices
 - Metric / imperial toggle (persisted, defaults to miles)
 - Monthly distance stacked by activity type, weekly activity calendar, HR zones, personal records, per-activity elevation profile + heart-rate line
@@ -49,7 +53,7 @@ WebCodecs matters here, not just MediaRecorder: every frame gets an **explicit p
 - **Cinematic intro** (optional, default on, 2–5s): camera starts at a state/country-scale view and eases into the route, with your **trip name** as a large title overlay (not a geocoded guess — you type it)
 - Sliders for **animation speed** and **photo pause length**; videos in the tour play through their real duration
 - Output can be saved as `.webm` or `.mp4` (the `.mp4` option just re-wraps the same bytes with an mp4 container tag — most players sniff the format and don't care about the extension; Instagram's stricter uploader may still reject it)
-- Real CartoDB Positron basemap tiles drawn under the route; moving dot sits exactly on a solid tour polyline (no drift between dot and trace)
+- Real basemap tiles (Esri's light gray canvas) drawn under the route; moving dot sits exactly on a solid tour polyline (no drift between dot and trace)
 - Monthly distance stacked by activity type
 - Weekly activity calendar
 - HR zones (when data is present)

@@ -6,7 +6,8 @@
 
 import { TYPE_COLORS } from '../design-system/activity-colors.js';
 
-export function renderWeeklyChart(activities, container) {
+export function renderWeeklyChart(activities, container, units = 'imperial') {
+  const isImperial = units === 'imperial';
   container.innerHTML = '';
   if (activities.length === 0) {
     container.innerHTML = '<p style="color:var(--text-muted);font-size:12px;text-align:center;padding:20px 0">No data</p>';
@@ -106,7 +107,9 @@ export function renderWeeklyChart(activities, container) {
       if (d.count === 0) return;
       const dateStr = d.date.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' });
       const types   = [...new Set(d.types)].join(', ');
-      const dist    = d.dist > 0 ? `<br>${(d.dist / 1000).toFixed(1)} km` : '';
+      const dist    = d.dist > 0
+        ? `<br>${isImperial ? `${(d.dist / 1609.344).toFixed(1)} mi` : `${(d.dist / 1000).toFixed(1)} km`}`
+        : '';
       tooltip.show(event, `<strong>${dateStr}</strong><br>${d.count} ${d.count === 1 ? 'activity' : 'activities'} · ${types}${dist}`);
     })
     .on('mouseleave', () => tooltip.hide());

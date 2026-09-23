@@ -38,11 +38,23 @@ export function renderRoute(activity, container) {
   const map = L.map(container, {
     zoomControl: true,
     attributionControl: true,
+    maxZoom: 20,
+    zoomSnap: 0.5,   // finer wheel/pinch steps at street level
   });
 
+  // Same two-layer basemap as the heatmap: Esri's gray canvas to z16, OSM
+  // standard past it, so a single route can be inspected at street level.
+  // (Dark mode inverts the tile pane in CSS — see index.html.)
   L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-    { maxZoom: 16, attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ' }
+    { maxZoom: 17, maxNativeZoom: 16, attribution: 'Tiles &copy; Esri' }
+  ).addTo(map);
+  L.tileLayer(
+    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    {
+      minZoom: 16.5, maxZoom: 20, maxNativeZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }
   ).addTo(map);
 
   // Determine coloring mode
@@ -56,7 +68,8 @@ export function renderRoute(activity, container) {
 
   // Fit bounds
   const bounds = L.latLngBounds(validPts.map(p => [p.lat, p.lng]));
-  map.fitBounds(bounds, { padding: [20, 20] });
+  // maxZoom so a 200m walk doesn't open pinned to the pavement.
+  map.fitBounds(bounds, { padding: [20, 20], maxZoom: 17 });
 
   // Start/end markers
   addMarker(map, validPts[0], '🟢', 'Start');

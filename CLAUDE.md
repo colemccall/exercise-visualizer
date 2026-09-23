@@ -13,17 +13,23 @@ what the app *does*. This file covers what a contributor needs to know.
 ## Current State
 
 **Built and working:**
-- Persistent top nav with three sibling views: **Map / Charts / Photos**. Upload is
-  a modal (auto-opens on first visit, reachable anytime via "Upload data").
+- Persistent top nav with three sibling views: **Map / Stats & Charts / Photos**.
+  Upload is a modal (auto-opens on first visit, reachable anytime via "Upload data").
+- Collapsible sections everywhere (see "Collapsible panels" below) plus a
+  full-screen map mode, so the map can have the whole viewport.
 - Two complete themes (light + dark), each independently designed and WCAG AA
   checked — not a token flip over one palette. Activity colors use the
   colorblind-safe Okabe-Ito palette.
 - Parsers: `strava.js`, `apple.js`, `gpx.js`, `photos.js`
 - Normalized Activity model — every parser emits the same shape
 - Dedup: flags the same workout recorded by both sources
-- Heatmap (By Type / Frequency styles), Locations / By Month / Timelapse panel
+- Heatmap (By Type / Frequency styles, each with a legend), Stats / Locations /
+  By Month / Timelapse panel
 - Charts: monthly distance, weekly calendar, HR zones, personal records,
   per-activity elevation + HR line
+- `charts/stats.js`: ~30 derived statistics (volume, consistency, streaks,
+  records, heart rate, per-type breakdown), full grid on the Stats view plus a
+  compact strip in the map's explore panel
 - Photo Tour: EXIF-timestamp → workout matching, GPS interpolation from GPX,
   cinema tour playback, HEIC + MP4/MOV support
 - Video export via WebCodecs (`VideoEncoder` + JS WebM muxer), with camera style,
@@ -34,6 +40,12 @@ what the app *does*. This file covers what a contributor needs to know.
 **Validated against real exports** (2026-08-10) — see "Real Test Data" below.
 Both sources parse end-to-end and the full Map/Charts flow renders with no
 uncaught errors. Four bugs were found and fixed in that pass; see git log.
+
+**Re-validated 2026-09-23** with the Strava export (441 activities, 70 routes)
+through Playwright at 1440px, 390px and 375px: both heat styles in both themes,
+zoom to z20, full-screen map, every collapse toggle, filters driving the stats,
+and the unit toggle. No console errors; `scrollWidth === innerWidth` on both
+phone widths.
 
 **Not yet built / known gaps:**
 - [ ] Photo Tour cinema view has not been audited on a narrow viewport (the rest
@@ -79,6 +91,7 @@ parsers/
   apple.js              — streamed export.xml + workout-routes/*.gpx
   photos.js             — EXIF via exifr (photos + video atoms)
 charts/
+  stats.js              — derived statistics (computeStats + two renderers)
   distance.js           — monthly distance, stacked by type
   weekly.js             — weekly activity calendar
   hr-zones.js           — % time in 5 HR zones
@@ -142,6 +155,76 @@ workout's *creation* date in local time, so matching them to a workout's UTC
 calendar day mislabels — and it only ever fired for workouts that genuinely have
 no route (yoga, strength), handing them someone else's GPS trace.
 
+## Collapsible Panels
+
+Anything carrying `data-collapse="<key>"` is a toggle. The section it folds is
+its closest `.panel` / `.chart-card` / `#explore-panel` ancestor, which gets the
+`collapsed` class; CSS then hides that section's `.collapsible-body`. State is
+persisted per key under `fitness-collapsed:<key>`, because the usual reason to
+collapse something here is "leave the map big" and that shouldn't reset on
+reload. `initCollapsibles()` in `app.js` wires all of it, including the chart
+cards (keyed by their chart div's id) and the "Collapse all sections" button.
+
+**D3 charts must be re-drawn after expanding.** They size to
+`container.clientWidth`, which is 0 while the section is hidden, and fall back
+to a placeholder width. `redrawCharts()` is called when a card or the charts
+panel expands and when the Stats view becomes visible — don't remove those
+calls, the charts come back stretched otherwise.
+
+Full-screen map (`body.map-fullscreen`, the "Expand map" button, `F`, `Esc`)
+sizes the map to `100dvh - var(--nav-h)`. `--nav-h` is measured in JS after the
+class is applied, not hard-coded: the nav wraps to two rows below 700px and
+full-screen mode drops the brand from it.
+
+## Basemaps and Zoom
+
+Two stacked tile layers in `map/heatmap.js` (and the same pair in
+`map/route.js`):
+
+- **z0-16** Esri `World_Light_Gray_Base` — the neutral canvas routes read best
+  against. Its tiles simply stop at z16.
+- **z17-20** OpenStreetMap standard tiles — native to z19, upscaled one step to
+  z20. This is what makes street-level zoom possible; the map used to refuse to
+  go past z16.
+
+**Do not use `basemaps.cartocdn.com`.** It now stamps "API KEY REQUIRED" across
+keyless tiles — that is why `photos/composite.js` (video export) was switched to
+the Esri tiles too; the watermark was being baked into exported frames.
+
+Dark mode does not swap providers. `html.dark-mode .leaflet-tile-pane` inverts
+the tiles in CSS, which gives every Leaflet map in the app a dark basemap at
+every zoom for free. Routes live in the overlay pane and keep their real colors.
+
+`coreBounds()` frames the initial view on the densest ~25km cell plus an ~80km
+radius instead of fitting every point. Fitting everything opened the map at
+continent scale for anyone who has travelled, with their real routes as specks.
+Routes outside that frame are still drawn — zoom out and they're there. Once the
+user pans or zooms (`_userMovedMap`), the map stops re-framing itself.
+
+## Frequency Heat Style
+
+`computeFrequency()` bins every trackpoint onto a ~78m grid, counts how many
+*separate activities* touch each cell (one increment per activity per cell, so
+laps within one workout don't inflate it), and scores each route by the median
+count along its path. Routes are then colored by percentile rank on a
+theme-specific sequential ramp, with weight and opacity also scaling with the
+score, and the hottest routes raised to the front.
+
+The previous implementation drew every route in one flat color at 0.12-0.15
+opacity and relied on overlap to darken — invisible for any route travelled
+once, and in dark mode a white stroke on the (then light) basemap, i.e. nothing
+at all. If you change the ramps, check both themes against a real export; the
+legend in the map's bottom-left reports the actual visit counts.
+
+## Units
+
+Miles are the default. `fitness-units` alone is not trusted at startup — an
+earlier build wrote a value into it on load, so a stored preference only counts
+when `fitness-units-explicit` is `'1'`, which `setUnits()` sets on a real click
+of the km/mi toggle. Every user-visible distance must go through the formatters
+in `app.js` (charts receive `units`; `charts/stats.js` receives the whole `fmt`
+bundle). A hardcoded `km` slipped into the weekly calendar's tooltip that way.
+
 ## Mobile / iOS
 
 Audited on 2026-08-10 at iPhone 13 (390px), iPhone SE (375px), and landscape.
@@ -154,6 +237,10 @@ the top nav packed ~635px of content into a 390px bar. If the app ever looks
 `window.innerWidth` and find the offender; don't reach for `initial-scale`.
 
 Traps already handled — don't undo them:
+- **The explore tab strip is `flex-shrink: 0`** for the desktop column layout.
+  With four tabs plus the "Hide panel" button that pushed the last tab off the
+  clipped edge of the panel on a 390px screen; the mobile rule restores
+  shrinking and wrapping.
 - **Nav** wraps to two rows below 700px; the "Upload data" label is hidden (icon +
   `aria-label` remain).
 - **Charts grid** needs `grid-column: 1 / -1 !important` on the cards. Two carry an
@@ -226,15 +313,26 @@ Two levels, both worth doing:
    Watch for zero-size Leaflet containers — `invalidateSize()` cannot rescue an
    element whose CSS height resolves to 0.
 
+   The heatmap's Leaflet instance is exposed as `window.__heatmapMap` for
+   exactly this — `setZoom`/`setView` it directly rather than clicking the zoom
+   control N times.
+
+   Useful assertions: route strokes are plain SVG paths under `#heatmap`, so
+   `getAttribute('stroke')` tells you what a heat style actually painted, and
+   `document.documentElement.scrollWidth` vs `window.innerWidth` is the mobile
+   overflow check from "Mobile / iOS".
+
 ---
 
 ## Remaining Work (Ordered)
 
 1. **Photo Tour + video export against real photos** — the photo pipeline and
-   WebCodecs export have not been exercised in this validation pass (only
+   WebCodecs export have not been exercised in either validation pass (only
    workouts were). Use the GPX folder plus a real camera roll. Check the cinema
    tour on a phone while you're there; it's the one surface the mobile pass
-   didn't cover.
+   didn't cover. Note `photos/composite.js` changed basemap provider on
+   2026-09-23 (CARTO → Esri, see "Basemaps and Zoom"); exported frames have not
+   been eyeballed since.
 2. **Verify on a physical iPhone** — real Files-app upload and Safari memory on a
    large Apple Health ZIP. Emulation can't answer either.
 3. Web Worker for Apple parsing — only if a real export is measured to freeze.
