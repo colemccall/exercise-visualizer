@@ -16,12 +16,14 @@ A persistent top bar with **Map / Stats & Charts / Photos** tabs — three sibli
 
 ### Map view
 
+The map *is* the page: it fills the window, and the numbers live on the Stats tab.
+
 - **Heatmap** of every GPS route with two styles:
   - *By type* — coloured per activity
-  - *Frequency* — each route coloured by how many separate activities share its path, on a sequential ramp with a legend giving the real visit counts. Your daily loop burns hot; a one-off route stays cool.
-- **Expand map** fills the screen with the map (or press <kbd>F</kbd>; <kbd>Esc</kbd> exits), and the panel below it collapses with **Hide panel** — the map takes the space either way
-- Stats / Locations / By Month / Timelapse tabs below the map, starting with a compact summary of the activities currently in view
+  - *Frequency* — each route coloured by how many separate activities share its path, on a sequential ramp with a legend giving the real visit counts. Your daily loop burns hot; a one-off route stays a saturated cool colour rather than fading into the basemap.
+- **Routes are the interface** — hover one to preview it, click to pin a card with its distance, duration, pace, climb and heart rate, then jump to the full activity detail or zoom the map to just that route. <kbd>Esc</kbd> or a click on empty map clears it.
 - Zooms to street level (z20 — individual buildings), and opens framed on the area you actually train in rather than zoomed out to fit one holiday abroad
+- A slim strip along the bottom holds **Locations / By Month / Timelapse**; it stays folded until you pick one, and **Expand map** (or <kbd>F</kbd>) hides even that
 
 ### Stats & Charts view
 

@@ -48,6 +48,10 @@
       border-radius: 0;
       box-shadow: none;
     }
+    /* The Map view sizes itself to the viewport, so the card's trailing
+       margin (set inline) would add a scrollbar for those few pixels. */
+    #dashboard-screen.view-map-active .bs-card { margin-bottom: 0 !important; }
+    body.view-map-active { overflow: hidden; }
 
     .upload-instructions {
       padding: var(--sp-5) var(--sp-6);
@@ -372,28 +376,33 @@
     }
     .upload-modal-close:hover { background: var(--surface-2); color: var(--text); }
 
-    /* ─── Map view: convert sidebar to strip below map ─── */
+    /* ─── Map view: the map is the page ───────────────────────────
+       The wrapper is a column with a *definite* height (viewport minus
+       the nav), so the map can take `flex: 1` and the tools strip below
+       it sizes to its content. A definite height on the wrapper is
+       load-bearing: with `height: auto` here, flex-basis governs the
+       map's vertical size, `#heatmap { height: 100% }` resolves to auto,
+       every absolutely-positioned Leaflet pane collapses, and the Map
+       view renders blank. */
     #view-map #heatmap-explore-wrapper {
       flex-direction: column;
-      height: auto;
+      height: calc(100vh - var(--nav-h, 56px));
+      height: calc(100dvh - var(--nav-h, 56px));
+      border-top: none;
+      border-bottom: none;
     }
     #view-map #heatmap-container {
-      /* flex: 0 0 auto is load-bearing. #heatmap-container is a flex item, and this
-         view stacks the wrapper into a column with height:auto. Left as `flex: 1`,
-         flex-basis governs the vertical size and `height: 60vh` is ignored, so the
-         container has no *specified* height — which makes `#heatmap { height: 100% }`
-         resolve to auto. Every Leaflet pane is absolutely positioned, so that
-         collapses the map to 0px and the whole Map view renders blank. */
-      flex: 0 0 auto;
-      height: 60vh;
-      min-height: 400px;
+      flex: 1 1 auto;
+      min-height: 240px;
     }
     #view-map #explore-panel {
       width: 100%;
       height: auto;
+      flex: 0 0 auto;
       border-left: none;
       border-top: 1px solid var(--border);
-      max-height: 260px;
+      max-height: 45%;
+      overflow-y: auto;
     }
     #view-map .explore-tabs {
       justify-content: flex-start;
@@ -1527,8 +1536,8 @@
       .charts-row { grid-template-columns: 1fr 1fr; }
     }
     @media (max-width: 900px) {
-      #heatmap-explore-wrapper { height: auto; flex-direction: column; }
-      #explore-panel { width: 100%; height: 220px; border-left: none; border-top: 1px solid var(--border); }
+      #heatmap-explore-wrapper { flex-direction: column; }
+      #explore-panel { width: 100%; border-left: none; border-top: 1px solid var(--border); }
       .stats-bar { grid-template-columns: repeat(3, 1fr); }
       .charts-row { grid-template-columns: 1fr 1fr; }
     }
@@ -1584,10 +1593,11 @@
       .filter-row input[type="date"] { flex: 1 1 40%; min-width: 0; }
       .filter-row select { flex: 1 1 30%; }
 
-      /* Map: leave room for the explore panel without a 400px floor on a
+      /* The wrapper is already viewport-height; let the map flex into
+         whatever the tools strip leaves, with a floor small enough for a
          664px-tall screen. */
-      #view-map #heatmap-container { height: 52vh; min-height: 260px; }
-      #explore-panel { max-height: none; }
+      #view-map #heatmap-container { height: auto; min-height: 200px; }
+      #view-map #explore-panel { max-height: 50%; }
       #view-map .etab-pane { max-height: 240px; }
 
       .stats-bar { grid-template-columns: repeat(2, 1fr); }
@@ -1638,7 +1648,7 @@
        breakpoint above doesn't apply but there are only ~340px of height. The
        400px map floor would otherwise be taller than the whole screen. */
     @media (max-height: 520px) {
-      #view-map #heatmap-container { height: 70vh; height: 70dvh; min-height: 180px; }
+      #view-map #heatmap-container { height: auto; min-height: 140px; }
       #app-nav { padding-top: 4px; padding-bottom: 4px; }
     }
 
@@ -2139,7 +2149,8 @@
 
     .map-legend {
       position: absolute;
-      left: 12px; bottom: 24px;
+      /* Under the zoom control, not bottom-left: the route card lives there. */
+      left: 12px; top: 92px;
       z-index: 500;
       background: var(--surface-raised, var(--surface));
       border: 1px solid var(--border);
@@ -2175,14 +2186,97 @@
       margin-top: 4px;
     }
 
+    /* ── Route card — hover previews a route, click pins it ── */
+    #route-card {
+      position: absolute;
+      left: 12px; bottom: 24px;
+      z-index: 600;
+      width: 260px;
+      max-width: calc(100% - 24px);
+      background: var(--surface-raised, var(--surface));
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-elev2, 0 2px 8px rgba(0,0,0,0.12));
+      padding: var(--sp-3) var(--sp-4);
+    }
+    #route-card[hidden] { display: none; }
+    #route-card.previewing { opacity: 0.94; }
+    .route-card-close {
+      position: absolute;
+      top: 4px; right: 6px;
+      background: none; border: none;
+      font-size: 18px; line-height: 1;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .route-card-close:hover { color: var(--text); }
+    .route-card-type {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #fff;
+      background: var(--text-mid);
+      border-radius: 3px;
+      padding: 2px 6px;
+      margin-bottom: 6px;
+    }
+    .route-card-name {
+      font-family: var(--font-display);
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+      padding-right: 14px;
+    }
+    .route-card-date { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .route-card-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 10px;
+      margin-top: var(--sp-3);
+    }
+    .route-card-stat-lbl {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-muted);
+      display: block;
+    }
+    .route-card-stat-val {
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .route-card-actions { display: flex; gap: 6px; margin-top: var(--sp-3); }
+    .route-card-btn {
+      flex: 1;
+      padding: 6px 8px;
+      background: transparent;
+      border: 1px solid var(--border-mid);
+      border-radius: var(--radius-sm);
+      font-family: var(--font-body);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-mid);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .route-card-btn:hover { color: var(--accent); border-color: var(--accent); }
+    .route-card-hint { font-size: 10px; color: var(--text-muted); margin-top: 6px; }
+
+    /* The map takes pointer cues from the routes themselves */
+    #heatmap .leaflet-interactive { cursor: pointer; }
+
     /* Full-screen map: nav stays, everything else on the page gives way.
        --nav-h is measured in JS because the nav wraps to two rows on
        narrow viewports. */
     body.map-fullscreen { overflow: hidden; }
-    body.map-fullscreen #view-map #heatmap-container {
-      height: calc(100vh - var(--nav-h, 56px));
-      height: calc(100dvh - var(--nav-h, 56px));
-    }
     body.map-fullscreen #explore-panel,
     body.map-fullscreen #duplicate-banner { display: none !important; }
     body.map-fullscreen #heatmap-explore-wrapper { border: none; }
@@ -2201,7 +2295,8 @@
          brand so the nav collapses to a single row of controls. */
       body.map-fullscreen .nav-brand { display: none; }
 
-      .map-legend { max-width: 150px; bottom: 14px; padding: 6px 8px; }
+      .map-legend { max-width: 150px; top: 84px; padding: 6px 8px; }
+      #route-card { width: auto; left: 8px; right: 8px; bottom: 14px; padding: var(--sp-3); }
       .map-legend-title { font-size: 9px; margin-bottom: 4px; }
       .map-legend-items { gap: 2px 8px; }
       .map-legend-item { font-size: 10px; }
@@ -2418,33 +2513,41 @@
             <span id="map-legend-max">frequent</span>
           </div>
         </div>
+
+        <!-- Route info card — hover previews a route, click pins it here -->
+        <div id="route-card" hidden>
+          <button type="button" class="route-card-close" id="btn-route-clear" aria-label="Clear selection">&times;</button>
+          <div class="route-card-type" id="route-card-type">Run</div>
+          <div class="route-card-name" id="route-card-name">Activity</div>
+          <div class="route-card-date" id="route-card-date"></div>
+          <div class="route-card-stats" id="route-card-stats"></div>
+          <div class="route-card-actions" id="route-card-actions">
+            <button type="button" class="route-card-btn" id="btn-route-detail">Open details</button>
+            <button type="button" class="route-card-btn" id="btn-route-zoom">Zoom to route</button>
+          </div>
+          <div class="route-card-hint" id="route-card-hint">Click a route to pin it here</div>
+        </div>
       </div>
 
       <div id="explore-panel">
         <div class="explore-head">
           <div class="explore-tabs">
-            <button class="etab active" data-tab="stats">Stats</button>
-            <button class="etab" data-tab="locations">Locations</button>
+            <button class="etab active" data-tab="locations">Locations</button>
             <button class="etab" data-tab="months">By Month</button>
             <button class="etab" data-tab="timelapse">Timelapse</button>
           </div>
           <button type="button" class="panel-toggle" id="btn-explore-collapse"
-                  data-collapse="explore" aria-expanded="true"
-                  title="Hide this panel and give the map the space">
+                  data-collapse="explore" aria-expanded="false"
+                  title="Show or hide the map tools; the map takes the space either way">
             <span class="panel-chevron" aria-hidden="true">&#9662;</span>
-            <span class="panel-toggle-label">Hide panel</span>
+            <span class="panel-toggle-label">Show tools</span>
           </button>
         </div>
 
         <div class="collapsible-body" id="explore-panel-body">
 
-        <!-- Stats tab -->
-        <div class="etab-pane active" id="etab-stats">
-          <!-- populated by JS -->
-        </div>
-
         <!-- Locations tab -->
-        <div class="etab-pane" id="etab-locations">
+        <div class="etab-pane active" id="etab-locations">
           <div id="locations-list" style="font-size:12px;color:var(--text-muted);">
             Load activities with GPS routes to see top locations.
           </div>

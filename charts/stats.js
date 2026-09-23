@@ -2,9 +2,9 @@
  * charts/stats.js
  * Derived statistics over a set of activities.
  *
- * computeStats() does the arithmetic and returns plain data; the two render
- * functions turn that into DOM. All formatting is delegated to the `fmt`
- * helpers passed in from app.js so units stay in one place.
+ * computeStats() does the arithmetic and returns plain data; renderStats()
+ * turns that into DOM. All formatting is delegated to the `fmt` helpers passed
+ * in from app.js so units stay in one place.
  *
  * Every stat carries a `hint` — the one-line explanation shown under the
  * number. These stats are only useful if you can tell what they mean without
@@ -350,46 +350,4 @@ export function renderStats(container, activities, opts = {}) {
       btn.addEventListener('click', () => onOpenActivity(btn.dataset.activity));
     });
   }
-}
-
-/**
- * Condensed stats for the map's explore panel — the numbers worth seeing
- * without leaving the map.
- */
-export function renderStatsCompact(container, activities, opts = {}) {
-  const { fmt } = opts;
-  const data = computeStats(activities, fmt);
-
-  if (!data.hasAny) {
-    container.innerHTML = '<div class="stats-empty">No activities in view.</div>';
-    return;
-  }
-
-  const { totals } = data;
-  const pick = (groupId, label) =>
-    data.groups.find(g => g.id === groupId)?.stats.find(s => s.label === label);
-
-  const rows = [
-    ['Activities', totals.count.toLocaleString()],
-    ['Distance',   fmt.distance(totals.totalDist)],
-    ['Moving time', fmt.movingTime(totals.totalSecs)],
-    ['Climbing',   fmt.elevation(totals.totalElev)],
-    ['Active days', pick('consistency', 'Active days')?.value],
-    ['Longest streak', pick('consistency', 'Longest streak')?.value],
-    ['Per week',   pick('volume', 'Distance per week')?.value],
-    ['Longest',    pick('records', 'Longest distance')?.value],
-  ].filter(r => r[1]);
-
-  container.innerHTML = `
-    <div class="compact-stats">
-      ${rows.map(([label, value]) => `
-        <div class="compact-stat">
-          <span class="compact-stat-lbl">${escapeHtml(label)}</span>
-          <span class="compact-stat-val">${escapeHtml(value)}</span>
-        </div>`).join('')}
-    </div>
-    <button type="button" class="compact-stats-more" id="btn-more-stats">See all stats &rarr;</button>`;
-
-  const more = container.querySelector('#btn-more-stats');
-  if (more && opts.onSeeAll) more.addEventListener('click', opts.onSeeAll);
 }

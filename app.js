@@ -34,11 +34,11 @@ import { renderDistanceChart }  from './charts/distance.js';
 import { renderWeeklyChart }    from './charts/weekly.js';
 import { renderHRZones }        from './charts/hr-zones.js';
 import { renderRecords }        from './charts/records.js';
-import { renderStats, renderStatsCompact } from './charts/stats.js';
+import { renderStats } from './charts/stats.js';
 import { renderElevationChart, renderHRLineChart } from './charts/elevation.js';
 
 // ── Map imports ───────────────────────────────────────────────────────────────
-import { initHeatmap, renderHeatmap, setHeatmapTheme, routeStyle, styleColor, setHeatStyle, getHeatStyle, getFrequencyRamp, getFrequencyRange, raiseHotRoutes, _renderedPolylines, _renderedActivities, TYPE_COLORS } from './map/heatmap.js';
+import { initHeatmap, renderHeatmap, setHeatmapTheme, routeStyle, styleColor, setHeatStyle, getHeatStyle, getFrequencyRamp, getFrequencyRange, raiseHotRoutes, setRouteHandlers, highlightRoute, clearHighlight, zoomToRoute, _renderedPolylines, _renderedActivities, TYPE_COLORS } from './map/heatmap.js';
 import { renderRoute }                from './map/route.js';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -468,6 +468,7 @@ async function showDashboard() {
       document.getElementById('heatmap'),
       initialCenter ? { center: initialCenter, zoom: 11 } : {},
     );
+    heatmapInstance.on('click', clearRouteSelection);
   }
 
   refreshDashboard();
@@ -495,6 +496,8 @@ function switchView(view) {
   // Toggle dashboard subview containers (map, charts) and the photos screen
   const dash = document.getElementById('dashboard-screen');
   const photosScreen = document.getElementById('photos-screen');
+  dash.classList.toggle('view-map-active', view === 'map');
+  document.body.classList.toggle('view-map-active', view === 'map');
   if (view === 'photos') {
     dash.classList.remove('visible');
     photosScreen.classList.add('visible');
@@ -507,6 +510,7 @@ function switchView(view) {
     });
     // Leaflet needs to re-measure if the map view just became visible
     if (view === 'map') {
+      syncNavHeight();   // the map's height is viewport minus the nav
       setTimeout(() => { try { heatmapInstance?.invalidateSize(); } catch {} }, 100);
     } else if (view === 'charts') {
       // Same reason as the collapse handlers: charts drawn into a hidden view
@@ -597,16 +601,19 @@ function showDuplicateBanner() {
   const pairs = getDuplicateCount();
   if (pairs === 0) {
     banner.style.display = 'none';
+    syncNavHeight();
     return;
   }
 
   banner.style.display = 'flex';
   document.getElementById('dup-count').textContent = pairs;
+  syncNavHeight();
 }
 
 function dismissDuplicateBanner() {
   const banner = document.getElementById('duplicate-banner');
   if (banner) banner.style.display = 'none';
+  syncNavHeight();
 }
 
 function refreshDashboard() {
@@ -624,7 +631,7 @@ function refreshDashboard() {
   refreshHeatmap(filtered);
 }
 
-/** Full stats panel (Stats & Charts view) + compact strip (map explore panel). */
+/** Full stats panel. Stats live on the Stats view only — the Map view is the map. */
 function renderAllStats(filtered) {
   const fmt = formatters();
 
@@ -640,17 +647,6 @@ function renderAllStats(filtered) {
     });
   }
 
-  const compact = document.getElementById('etab-stats');
-  if (compact) {
-    renderStatsCompact(compact, filtered, {
-      fmt,
-      onSeeAll: () => {
-        switchView('charts');
-        setCollapsed('stats', false);
-        document.getElementById('panel-stats')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      },
-    });
-  }
 }
 
 /** One-line description of the active filters, shown in the panel header. */
@@ -796,12 +792,18 @@ function renderCharts(activities) {
 
 const COLLAPSE_PREFIX = 'fitness-collapsed:';
 
+/** Sections that start folded. The map's tools strip does, so the Map view
+ *  opens as just the map. */
+const COLLAPSED_BY_DEFAULT = { explore: true };
+
 function collapseSectionFor(toggle) {
   return toggle.closest('.panel, .chart-card, #explore-panel');
 }
 
 function isCollapsed(key) {
-  return localStorage.getItem(COLLAPSE_PREFIX + key) === '1';
+  const stored = localStorage.getItem(COLLAPSE_PREFIX + key);
+  if (stored === null) return !!COLLAPSED_BY_DEFAULT[key];
+  return stored === '1';
 }
 
 function setCollapsed(key, collapsed) {
@@ -818,7 +820,7 @@ function setCollapsed(key, collapsed) {
   if (!collapsed && key === 'charts') redrawCharts();
 
   const label = toggle.querySelector('.panel-toggle-label');
-  if (label) label.textContent = collapsed ? 'Show panel' : 'Hide panel';
+  if (label) label.textContent = collapsed ? 'Show tools' : 'Hide tools';
 
   // Leaflet measures on layout; collapsing the explore panel resizes the map.
   if (section.id === 'explore-panel') {
@@ -873,9 +875,18 @@ function initCollapsibles() {
 // wraps to two rows under 700px.
 // ═════════════════════════════════════════════════════════════════════════════
 
+/**
+ * Publish the height of everything stacked above the map as `--nav-h`, so the
+ * Map view can size itself to the rest of the viewport. That's the nav plus the
+ * duplicate banner when it's showing — measured, not hard-coded, because the
+ * nav wraps to two rows below 700px and the banner comes and goes.
+ */
 function syncNavHeight() {
-  const nav = document.getElementById('app-nav');
-  if (nav) document.body.style.setProperty('--nav-h', `${nav.offsetHeight}px`);
+  const nav    = document.getElementById('app-nav');
+  const banner = document.getElementById('duplicate-banner');
+  const navH    = nav ? nav.offsetHeight : 56;
+  const bannerH = banner && banner.offsetParent !== null ? banner.offsetHeight : 0;
+  document.body.style.setProperty('--nav-h', `${navH + bannerH}px`);
 }
 
 function setMapFullscreen(on) {
@@ -897,6 +908,118 @@ function setMapFullscreen(on) {
 
 function toggleMapFullscreen() {
   setMapFullscreen(!document.body.classList.contains('map-fullscreen'));
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ROUTE SELECTION
+//
+// The Map view is the map, so the routes themselves are the interface: hover
+// previews one, click pins it in a card with the numbers and a way into the
+// full detail view. Selection is independent of the filters — it's a pointer at
+// one activity, not a filter state.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** @type {Activity|null} Pinned route, if any */
+let _selectedRoute = null;
+
+function routeCardEls() {
+  return {
+    card:    document.getElementById('route-card'),
+    type:    document.getElementById('route-card-type'),
+    name:    document.getElementById('route-card-name'),
+    date:    document.getElementById('route-card-date'),
+    stats:   document.getElementById('route-card-stats'),
+    actions: document.getElementById('route-card-actions'),
+    hint:    document.getElementById('route-card-hint'),
+    close:   document.getElementById('btn-route-clear'),
+  };
+}
+
+function renderRouteCard(activity, { pinned }) {
+  const els = routeCardEls();
+  if (!els.card || !activity) return;
+
+  els.card.hidden = false;
+  els.card.classList.toggle('previewing', !pinned);
+
+  const color = TYPE_COLORS[activity.type] || TYPE_COLORS.Other;
+  els.type.textContent = activity.type;
+  els.type.style.background = color;
+  els.name.textContent = activity.name;
+  els.date.textContent = [
+    activity.date?.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }),
+    activity.source,
+  ].filter(Boolean).join(' · ');
+
+  const rows = [
+    ['Distance', formatDistance(activity.distance_m)],
+    ['Duration', formatDuration(activity.duration_s)],
+    ['Pace',     formatPace(activity.distance_m, activity.duration_s)],
+    ['Climb',    formatElevation(activity.elevation_gain_m)],
+  ];
+  if (activity.avg_heart_rate) rows.push(['Avg HR', `${activity.avg_heart_rate} bpm`]);
+  if (typeof activity._freqScore === 'number' && activity._freqScore > 0) {
+    rows.push(['Shared by', `${activity._freqScore} ${activity._freqScore === 1 ? 'activity' : 'activities'}`]);
+  }
+
+  els.stats.innerHTML = rows.map(([label, value]) => `
+    <div>
+      <span class="route-card-stat-lbl">${escapeHtml(label)}</span>
+      <span class="route-card-stat-val">${escapeHtml(value)}</span>
+    </div>`).join('');
+
+  els.actions.hidden = !pinned;
+  els.close.hidden   = !pinned;
+  els.hint.textContent = pinned ? 'Esc or the map background clears this' : 'Click the route to pin it';
+}
+
+function hideRouteCard() {
+  const els = routeCardEls();
+  if (els.card) els.card.hidden = true;
+}
+
+function previewRoute(activity, entering) {
+  if (entering) {
+    highlightRoute(activity, { preview: true });
+    renderRouteCard(activity, { pinned: false });
+  } else if (_selectedRoute) {
+    // Fall back to whatever is pinned rather than clearing outright.
+    highlightRoute(_selectedRoute, { preview: false });
+    renderRouteCard(_selectedRoute, { pinned: true });
+  } else {
+    clearHighlight();
+    hideRouteCard();
+  }
+}
+
+function selectRoute(activity) {
+  _selectedRoute = activity;
+  highlightRoute(activity, { preview: false });
+  renderRouteCard(activity, { pinned: true });
+}
+
+function clearRouteSelection() {
+  _selectedRoute = null;
+  clearHighlight();
+  hideRouteCard();
+}
+
+function initRouteInteraction() {
+  setRouteHandlers({
+    onHover: previewRoute,
+    onSelect: (activity) => {
+      if (_selectedRoute && _selectedRoute.id === activity.id) clearRouteSelection();
+      else selectRoute(activity);
+    },
+  });
+
+  document.getElementById('btn-route-clear')?.addEventListener('click', clearRouteSelection);
+  document.getElementById('btn-route-detail')?.addEventListener('click', () => {
+    if (_selectedRoute) openDetail(_selectedRoute);
+  });
+  document.getElementById('btn-route-zoom')?.addEventListener('click', () => {
+    if (_selectedRoute) zoomToRoute(_selectedRoute);
+  });
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -948,6 +1071,11 @@ let _monthFilter = null; // 'YYYY-M' or null
 function initExplorePanel() {
   document.querySelectorAll('.etab').forEach(btn => {
     btn.addEventListener('click', () => {
+      // The strip starts collapsed to leave the map alone; picking a tab is a
+      // request to see it, so open it rather than switching a hidden pane.
+      if (document.getElementById('explore-panel')?.classList.contains('collapsed')) {
+        setCollapsed('explore', false);
+      }
       _exploreActiveTab = btn.dataset.tab;
       document.querySelectorAll('.etab').forEach(b => b.classList.toggle('active', b === btn));
       document.querySelectorAll('.etab-pane').forEach(p => p.classList.toggle('active', p.id === `etab-${_exploreActiveTab}`));
@@ -1322,6 +1450,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '');
     if (e.key === 'Escape') {
       if (document.getElementById('detail-overlay')?.classList.contains('open')) closeDetail();
+      else if (_selectedRoute) clearRouteSelection();
       else if (document.body.classList.contains('map-fullscreen')) setMapFullscreen(false);
       else closeDetail();
     } else if ((e.key === 'f' || e.key === 'F') && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
@@ -1332,8 +1461,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Collapsible panels + full-screen map
+  // Collapsible panels + full-screen map + route selection
   initCollapsibles();
+  initRouteInteraction();
   syncNavHeight();
   window.addEventListener('resize', syncNavHeight);
   document.getElementById('btn-map-fullscreen')?.addEventListener('click', toggleMapFullscreen);
@@ -1471,6 +1601,7 @@ function tlPrepare() {
     return false;
   }
 
+  clearRouteSelection();
   tlRoutes = tlGetSortedRoutes();
   if (tlRoutes.length === 0) {
     showToast('No routable activities to animate');

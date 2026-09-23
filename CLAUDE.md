@@ -15,21 +15,23 @@ what the app *does*. This file covers what a contributor needs to know.
 **Built and working:**
 - Persistent top nav with three sibling views: **Map / Stats & Charts / Photos**.
   Upload is a modal (auto-opens on first visit, reachable anytime via "Upload data").
-- Collapsible sections everywhere (see "Collapsible panels" below) plus a
-  full-screen map mode, so the map can have the whole viewport.
+- The Map view is just the map: it sizes itself to the viewport, routes are
+  hover/click interactive, and the tools strip (Locations / By Month /
+  Timelapse) stays folded until asked for. No stats live there.
+- Collapsible sections on the Stats view (see "Collapsible panels" below) plus a
+  full-screen map mode.
 - Two complete themes (light + dark), each independently designed and WCAG AA
   checked — not a token flip over one palette. Activity colors use the
   colorblind-safe Okabe-Ito palette.
 - Parsers: `strava.js`, `apple.js`, `gpx.js`, `photos.js`
 - Normalized Activity model — every parser emits the same shape
 - Dedup: flags the same workout recorded by both sources
-- Heatmap (By Type / Frequency styles, each with a legend), Stats / Locations /
-  By Month / Timelapse panel
+- Heatmap (By Type / Frequency styles, each with a legend), route hover/select
+  card, Locations / By Month / Timelapse strip
 - Charts: monthly distance, weekly calendar, HR zones, personal records,
   per-activity elevation + HR line
 - `charts/stats.js`: ~30 derived statistics (volume, consistency, streaks,
-  records, heart rate, per-type breakdown), full grid on the Stats view plus a
-  compact strip in the map's explore panel
+  records, heart rate, per-type breakdown) on the Stats view
 - Photo Tour: EXIF-timestamp → workout matching, GPS interpolation from GPX,
   cinema tour playback, HEIC + MP4/MOV support
 - Video export via WebCodecs (`VideoEncoder` + JS WebM muxer), with camera style,
@@ -43,9 +45,16 @@ uncaught errors. Four bugs were found and fixed in that pass; see git log.
 
 **Re-validated 2026-09-23** with the Strava export (441 activities, 70 routes)
 through Playwright at 1440px, 390px and 375px: both heat styles in both themes,
-zoom to z20, full-screen map, every collapse toggle, filters driving the stats,
-and the unit toggle. No console errors; `scrollWidth === innerWidth` on both
-phone widths.
+zoom to z20 via the control, wheel and double-click, the viewport-height map
+layout, route hover/pin/zoom/detail, full-screen map, every collapse toggle,
+filters driving the stats, and the unit toggle. No console errors;
+`scrollWidth === innerWidth` on both phone widths.
+
+Note on "it didn't change after a push": GitHub Pages serves `index.html` with
+`cache-control: max-age=600` and browsers cache ES modules aggressively, so a
+deploy can take ten minutes to show up — or need a hard reload. Confirm what is
+actually live by fetching the file (`curl .../map/heatmap.js`) before chasing a
+bug that is really a cached build.
 
 **Not yet built / known gaps:**
 - [ ] Photo Tour cinema view has not been audited on a narrow viewport (the rest
@@ -171,10 +180,35 @@ to a placeholder width. `redrawCharts()` is called when a card or the charts
 panel expands and when the Stats view becomes visible — don't remove those
 calls, the charts come back stretched otherwise.
 
-Full-screen map (`body.map-fullscreen`, the "Expand map" button, `F`, `Esc`)
-sizes the map to `100dvh - var(--nav-h)`. `--nav-h` is measured in JS after the
-class is applied, not hard-coded: the nav wraps to two rows below 700px and
-full-screen mode drops the brand from it.
+## Map View Layout
+
+`#heatmap-explore-wrapper` has a *definite* height — `100dvh - var(--nav-h)` —
+which is what lets the map take `flex: 1` and the tools strip size to its
+content. With `height: auto` there, flex-basis governs the map's height,
+`#heatmap { height: 100% }` resolves to auto, every absolutely-positioned
+Leaflet pane collapses, and the Map view renders blank. That trap is why the map
+used to be pinned to `60vh`.
+
+`--nav-h` is everything stacked above the map — the nav plus the duplicate
+banner when it's showing — measured in JS (`syncNavHeight`), never hard-coded:
+the nav wraps to two rows below 700px, full-screen mode drops the brand from it,
+and the banner comes and goes. Call it after anything that changes that chrome.
+`body.view-map-active` sets `overflow: hidden`, since the view is exactly one
+viewport tall and shouldn't also scroll.
+
+The tools strip is collapsed by default (`COLLAPSED_BY_DEFAULT` in `app.js`);
+clicking any of its tabs opens it rather than switching a hidden pane.
+
+## Route Selection
+
+Routes are the content, so they behave like it: `setRouteHandlers()` in
+`map/heatmap.js` takes `onHover`/`onSelect` from `app.js`, which owns the card
+UI. `highlightRoute()` draws a casing in the page background colour plus the
+route in its own colour — two lines rather than one thick one, so the highlight
+reads against both a dense cluster and an empty map. The click handler calls
+`L.DomEvent.stopPropagation`, otherwise the map's own click handler (which
+clears the selection) fires immediately after. Selection is a pointer at one
+activity, deliberately independent of the filters.
 
 ## Basemaps and Zoom
 
@@ -206,9 +240,15 @@ user pans or zooms (`_userMovedMap`), the map stops re-framing itself.
 `computeFrequency()` bins every trackpoint onto a ~78m grid, counts how many
 *separate activities* touch each cell (one increment per activity per cell, so
 laps within one workout don't inflate it), and scores each route by the median
-count along its path. Routes are then colored by percentile rank on a
-theme-specific sequential ramp, with weight and opacity also scaling with the
-score, and the hottest routes raised to the front.
+count along its path. Colour position blends percentile rank (spreads the
+palette evenly over the routes you actually have) with a log scale of the raw
+count (keeps the colour tied to "how many times"), with weight and opacity also
+scaling, and the hottest routes raised to the front.
+
+Both ramps stay saturated at *both* ends, and opacity floors at 0.7. A pale or
+near-grey low end reads as "the map is washing my routes out" rather than "I
+rarely go here" — the colour carries the reading, opacity and weight only add
+emphasis.
 
 The previous implementation drew every route in one flat color at 0.12-0.15
 opacity and relied on overlap to darken — invisible for any route travelled

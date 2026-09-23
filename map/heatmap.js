@@ -76,10 +76,14 @@ export function setHeatStyle(style) {
    ~78m grid, count how many separate activities touch each cell, and score each
    route by the median cell count along it. Routes are coloured by their
    percentile rank on a sequential ramp, so the colours spread evenly no matter
-   how skewed the raw counts are.                                             */
+   how skewed the raw counts are.
 
-const FREQ_RAMP_LIGHT = ['#C3D5EA', '#8AA8DA', '#8F6BC6', '#C3479C', '#D42B4B', '#9C1020'];
-const FREQ_RAMP_DARK  = ['#2C3E8F', '#5A4FC8', '#9B4FD1', '#E0479B', '#FF7A45', '#FFD166'];
+   Both ramps stay saturated at *both* ends. A pale or near-grey low end reads
+   as "the map is washing my routes out" rather than "this is a road I rarely
+   use" — a route you rode once should still look like a coloured route.      */
+
+const FREQ_RAMP_LIGHT = ['#2C5FCC', '#7A3FC9', '#B92C9E', '#D92B4E', '#E8590C'];
+const FREQ_RAMP_DARK  = ['#4C8DFF', '#8B5CF6', '#E040A0', '#FF7A45', '#FFD166'];
 
 let _freqRange = { min: 1, max: 1 };
 
@@ -159,18 +163,27 @@ export function computeFrequency(activities) {
     ? { min: scores[0], max: scores[scores.length - 1] }
     : { min: 1, max: 1 };
 
+  // Colour position blends two readings of the same number: percentile rank
+  // spreads the palette evenly across the routes you actually have, and a log
+  // scale of the raw count keeps the colour tied to "how many times", so a
+  // dataset where nothing repeats doesn't paint itself as if it did.
+  const logMax = Math.log(Math.max(2, _freqRange.max));
   for (const { act } of perAct) {
-    act._freqT = scores.length > 1
+    const percentile = scores.length > 1
       ? lowerBound(scores, act._freqScore) / (scores.length - 1)
       : 1;
+    const logT = Math.log(Math.max(1, act._freqScore)) / logMax;
+    act._freqT = 0.6 * percentile + 0.4 * Math.min(1, logT);
   }
 }
 
 export function routeStyle(dark, activity) {
   if (_heatStyle === 'frequency') {
     const t = activity && typeof activity._freqT === 'number' ? activity._freqT : 0.5;
-    // Busy routes draw thicker and more opaque, so hot paths read first.
-    return { weight: 2 + 2 * t, opacity: 0.45 + 0.5 * t };
+    // Busy routes draw thicker and more opaque. The floor is high enough that a
+    // once-ridden route is a solid line, not a ghost: opacity carries emphasis,
+    // colour carries the actual reading.
+    return { weight: 2.5 + 2 * t, opacity: 0.7 + 0.25 * t };
   }
   return dark
     ? { weight: 1.5, opacity: 0.55 }  // brighter on dark
@@ -184,6 +197,75 @@ export function styleColor(activity, dark) {
     return rampColor(t, dark);
   }
   return TYPE_COLORS[activity.type] || TYPE_COLORS.Other;
+}
+
+/* ── Route interaction ───────────────────────────────────────────────────────
+   Routes are the content of this page, so they behave like content: hover to
+   preview, click to pin. app.js owns the card UI and decides what a click
+   means; this module owns the map-side drawing.                             */
+
+let _routeHandlers = {};
+let _highlightLayer = null;
+
+export function setRouteHandlers(handlers) {
+  _routeHandlers = { ..._routeHandlers, ...handlers };
+}
+
+function attachRouteHandlers(polyline, activity) {
+  polyline.on('mouseover', () => _routeHandlers.onHover?.(activity, true));
+  polyline.on('mouseout',  () => _routeHandlers.onHover?.(activity, false));
+  polyline.on('click', (e) => {
+    L.DomEvent.stopPropagation(e);   // don't let the map's own click clear it
+    _routeHandlers.onSelect?.(activity);
+  });
+}
+
+function activityLatLngs(activity) {
+  return (activity?.route_points || [])
+    .filter(p => p.lat !== null && p.lng !== null)
+    .map(p => [p.lat, p.lng]);
+}
+
+/**
+ * Draw a route on top of everything else: a casing in the page background
+ * colour, then the route in its own colour. Two lines rather than one thick
+ * one, so the highlight reads against both a dense cluster and an empty map.
+ */
+export function highlightRoute(activity, { preview = false } = {}) {
+  clearHighlight();
+  if (!_map || !activity) return;
+  const latLngs = activityLatLngs(activity);
+  if (latLngs.length < 2) return;
+
+  const dark = isDark();
+  _highlightLayer = L.layerGroup([
+    L.polyline(latLngs, {
+      color: dark ? '#0b0c10' : '#ffffff',
+      weight: preview ? 7 : 9,
+      opacity: preview ? 0.75 : 0.9,
+      lineJoin: 'round', lineCap: 'round', interactive: false,
+    }),
+    L.polyline(latLngs, {
+      color: styleColor(activity, dark),
+      weight: preview ? 3.5 : 4.5,
+      opacity: 1,
+      lineJoin: 'round', lineCap: 'round', interactive: false,
+    }),
+  ]).addTo(_map);
+}
+
+export function clearHighlight() {
+  if (_highlightLayer && _map) _map.removeLayer(_highlightLayer);
+  _highlightLayer = null;
+}
+
+/** Frame a single route. */
+export function zoomToRoute(activity) {
+  if (!_map) return;
+  const latLngs = activityLatLngs(activity);
+  if (latLngs.length < 2) return;
+  _userMovedMap = true; // a deliberate framing — don't undo it on the next load
+  _map.fitBounds(L.latLngBounds(latLngs), { padding: [40, 40], maxZoom: 17 });
 }
 
 /** Re-stack so the busiest routes sit above the quiet ones. */
@@ -324,6 +406,7 @@ export async function renderHeatmap(activities, map) {
       const polyline = L.polyline(latLngs, {
         color, weight, opacity, lineJoin: 'round', lineCap: 'round',
       });
+      attachRouteHandlers(polyline, activity);
       polyline.addTo(_routeLayerGroup);
       allLatLngs.push(...latLngs);
       _renderedPolylines.push(polyline);
