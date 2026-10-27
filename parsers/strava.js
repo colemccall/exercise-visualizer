@@ -10,34 +10,41 @@
  *   - A .zip file → extracted with JSZip
  *   - A bare activities.csv file (no GPX route data)
  *
- * Output conforms to the normalized Activity model:
- * {
- *   id, source, name, type, date, distance_m, duration_s,
- *   elevation_gain_m, avg_heart_rate, max_heart_rate,
- *   has_route, gpx_file, route_points
- * }
+ * Routes: `.gpx`, `.gpx.gz`, `.fit` and `.fit.gz` entries all load (FIT via
+ * parsers/fit.js); TCX is not decoded.
+ *
+ * Output conforms to the normalized Activity model (see parsers/model.js).
  */
 
-import { parseGPX, computeDistance, computeElevationGain } from './gpx.js';
+import { parseGPX, computeDistance, computeElevationGain, readText, loadGpxEntry, gunzipToBytes } from './gpx.js';
+import { parseFit } from './fit.js';
+import { createActivity, humanize } from './model.js';
 
 // ── Activity type mapping from Strava sport type strings ──────────────────────
+// Keys are normalized (lowercase, letters/digits only) so "VirtualRide" (API
+// style) and "Virtual Ride" (what activities.csv actually writes) both match.
 const TYPE_MAP = {
-  'Run':               'Run',
-  'VirtualRun':        'Run',
-  'TrailRun':          'Run',
-  'Ride':              'Ride',
-  'VirtualRide':       'Ride',
-  'MountainBikeRide':  'Ride',
-  'GravelRide':        'Ride',
-  'EBikeRide':         'Ride',
-  'Walk':              'Walk',
-  'Hike':              'Hike',
-  'Swim':              'Swim',
-  'OpenWaterSwim':     'Swim',
+  'run':               'Run',
+  'virtualrun':        'Run',
+  'trailrun':          'Run',
+  'ride':              'Ride',
+  'virtualride':       'Ride',
+  'mountainbikeride':  'Ride',
+  'emountainbikeride': 'Ride',
+  'gravelride':        'Ride',
+  'ebikeride':         'Ride',
+  'walk':              'Walk',
+  'hike':              'Hike',
+  'swim':              'Swim',
+  'openwaterswim':     'Swim',
 };
 
+function normalizeTypeKey(label) {
+  return String(label || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 function mapType(stravaType) {
-  return TYPE_MAP[stravaType] || 'Other';
+  return TYPE_MAP[normalizeTypeKey(stravaType)] || 'Other';
 }
 
 // ── Duration parsing ──────────────────────────────────────────────────────────
@@ -167,8 +174,14 @@ function parseCSV(text) {
     headers.forEach((h, idx) => {
       // First occurrence wins — Strava's extended export duplicates column names
       // (e.g. two "Distance" columns: first is km, second is metres in extended format).
+      // Later copies stay reachable as "Distance#2", "Distance#3", …
+      const value = row[idx] !== undefined ? row[idx].trim() : '';
       if (!(h in obj)) {
-        obj[h] = row[idx] !== undefined ? row[idx].trim() : '';
+        obj[h] = value;
+      } else {
+        let n = 2;
+        while (`${h}#${n}` in obj) n++;
+        obj[`${h}#${n}`] = value;
       }
     });
     records.push(obj);
@@ -220,19 +233,22 @@ export async function parse(file, onProgress = () => {}) {
       // Check for a matching GPX file inside the zip
       if (row['Filename']) {
         const gpxPath = row['Filename'];
-        // The zip may store files as "activities/xxxx.gpx" or "activities/xxxx.gpx.gz"
+        // The zip may store files as "activities/xxxx.gpx" or "activities/xxxx.gpx.gz".
+        // Most of a modern export is "activities/xxxx.fit.gz", decoded by parsers/fit.js.
         const gpxEntry = findZipEntry(zip, gpxPath) ||
                          findZipEntry(zip, gpxPath + '.gz');
 
-        if (gpxEntry && gpxPath.toLowerCase().endsWith('.gpx')) {
+        if (gpxEntry && /\.fit(\.gz)?$/i.test(gpxEntry.name)) {
+          activity.has_route = true;
+          activity.gpx_file = gpxEntry.name;
+          activity._gpxLoader = () => loadFitEntry(gpxEntry);
+        } else if (gpxEntry && /\.gpx(\.gz)?$/i.test(gpxEntry.name)) {
           activity.has_route = true;
           // Store the zip entry name so we can lazy-load it later
           activity.gpx_file = gpxEntry.name;
-          // Attach a lazy-loader — called by the heatmap/route code
-          activity._gpxLoader = async () => {
-            const text = await gpxEntry.async('string');
-            return parseGPX(text);
-          };
+          // Attach a lazy-loader — called by the heatmap/route code.
+          // loadGpxEntry gunzips .gpx.gz entries.
+          activity._gpxLoader = () => loadGpxEntry(gpxEntry);
         }
       }
 
@@ -247,7 +263,7 @@ export async function parse(file, onProgress = () => {}) {
 
   // ── Case 2: Plain CSV file ────────────────────────────────────────────────
   else if (lowerName.endsWith('.csv')) {
-    const csvText = await file.text();
+    const csvText = await readText(file);
     const records = parseCSV(csvText);
 
     for (const row of records) {
@@ -258,7 +274,7 @@ export async function parse(file, onProgress = () => {}) {
 
   // ── Case 3: Standalone GPX file ───────────────────────────────────────────
   else if (lowerName.endsWith('.gpx')) {
-    const gpxText = await file.text();
+    const gpxText = await readText(file);
     const points = parseGPX(gpxText);
 
     if (points.length > 0) {
@@ -272,51 +288,84 @@ export async function parse(file, onProgress = () => {}) {
 }
 
 // ── Convert a CSV row to an Activity object ───────────────────────────────────
+// Parse a numeric CSV cell: blank / non-numeric → null.
+function num(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = parseFloat(v);
+  return isNaN(n) ? null : n;
+}
+
+// Sensor/energy columns use 0 for "not recorded" — treat that as missing.
+function positive(v) {
+  const n = num(v);
+  return n !== null && n > 0 ? n : null;
+}
+
+// Small stable string hash, for ids when a row has no Activity ID.
+function hashString(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
 function rowToActivity(row) {
   // Strava CSV columns (may vary by export date):
   // "Activity ID", "Activity Date", "Activity Name", "Activity Type",
-  // "Elapsed Time", "Distance", "Commute", "Filename", ...
-  const id = row['Activity ID'] || row['id'] || String(Math.random());
+  // "Elapsed Time", "Moving Time", "Distance", "Calories", "Average Cadence",
+  // "Average Watts", "Max Speed", "Activity Gear", "Commute", "Filename", ...
   const rawDate = row['Activity Date'] || row['date'] || '';
   const date = parseStravaDate(rawDate);
 
   if (!date) return null;
 
   const name = row['Activity Name'] || row['name'] || 'Strava Activity';
-  const type = mapType(row['Activity Type'] || row['type'] || '');
+  // No Activity ID: derive one from the row itself so re-imports get the same id.
+  const id = row['Activity ID'] || row['id'] || `${date.getTime()}-${hashString(name)}`;
+  const rawType = row['Activity Type'] || row['type'] || '';
+  const type = mapType(rawType);
 
   // Distance: Strava's activities.csv first "Distance" column is in km.
-  // Convert km → metres.
-  const distKm = parseFloat(row['Distance'] || row['distance'] || '0');
-  const distance_m = distKm * 1000;
+  // The extended export repeats it in metres (second column, more precise) —
+  // use that when it agrees with the km value, else convert km → metres.
+  const distKm = parseFloat(row['Distance'] || row['distance'] || '0') || 0;
+  let distance_m = distKm * 1000;
+  const distM = num(row['Distance#2']);
+  if (distM !== null && distM > 0 && Math.abs(distM - distance_m) <= Math.max(50, distance_m * 0.05)) {
+    distance_m = distM;
+  }
 
-  // Duration: "Elapsed Time" is in seconds
+  // Duration: "Elapsed Time" is in seconds; "Moving Time" excludes pauses.
   const duration_s = parseDuration(row['Elapsed Time'] || row['elapsed_time'] || '0');
+  const moving = num(row['Moving Time'] ?? row['moving_time']);
 
   // Elevation: "Elevation Gain" in metres
   const elevRaw = parseFloat(row['Elevation Gain'] || row['total_elevation_gain'] || '');
   const elevation_gain_m = isNaN(elevRaw) ? null : elevRaw;
 
-  // Heart rate
-  const avgHR = parseInt(row['Average Heart Rate'] || row['average_heartrate'] || '', 10);
-  const maxHR = parseInt(row['Max Heart Rate'] || row['max_heartrate'] || '', 10);
+  // Heart rate (cells can be "115.0")
+  const avgHR = Math.round(parseFloat(row['Average Heart Rate'] || row['average_heartrate'] || ''));
+  const maxHR = Math.round(parseFloat(row['Max Heart Rate'] || row['max_heartrate'] || ''));
 
-  return {
+  return createActivity({
     id: `strava-${id}`,
     source: 'strava',
     name,
     type,
+    sub_type: humanize(rawType) || type,
     date,
     distance_m,
     duration_s,
+    moving_s: moving !== null && moving > 0 ? Math.round(moving) : null,
     elevation_gain_m,
     avg_heart_rate: isNaN(avgHR) ? null : avgHR,
     max_heart_rate: isNaN(maxHR) ? null : maxHR,
-    has_route: false,
-    gpx_file: null,
-    route_points: null,
-    has_duplicate: false,
-  };
+    calories_kcal: positive(row['Calories'] ?? row['calories']),
+    avg_cadence: positive(row['Average Cadence']),
+    avg_watts: positive(row['Average Watts']),
+    max_speed_mps: positive(row['Max Speed']),
+    gear: row['Activity Gear'] || row['Gear'] || row['Bike'] || null,
+    description: row['Activity Description'] || null,
+  });
 }
 
 // ── Convert GPX points to a minimal Activity (standalone GPX upload) ─────────
@@ -336,25 +385,39 @@ function gpxToActivity(points, filename) {
   const avg_hr = hrs.length ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : null;
   const max_hr = hrs.length ? Math.max(...hrs) : null;
 
-  return {
+  const mean = (vals) => vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+  const cads = points.map(p => p.cad).filter(c => c !== null && c !== undefined);
+  const watts = points.map(p => p.watts).filter(w => w !== null && w !== undefined);
+
+  return createActivity({
     id: `strava-gpx-${date.getTime()}`,
     source: 'strava',
     name: filename.replace(/\.gpx$/i, '').replace(/_/g, ' '),
     type: 'Other',
+    sub_type: 'GPX track',
     date,
     distance_m: dist,
     duration_s,
+    moving_s: duration_s || null,
     elevation_gain_m: elev,
     avg_heart_rate: avg_hr,
     max_heart_rate: max_hr,
+    avg_cadence: mean(cads),
+    avg_watts: mean(watts),
     has_route: true,
     gpx_file: filename,
     route_points: points,
-    has_duplicate: false,
-  };
+  });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+/** Read a .fit or .fit.gz zip entry (sniffed by gzip magic bytes) into trackpoints. */
+async function loadFitEntry(zipEntry) {
+  let bytes = await zipEntry.async('uint8array');
+  if (bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) bytes = await gunzipToBytes(bytes);
+  return parseFit(bytes);
+}
+
 function findZipEntry(zip, path) {
   // Try exact match first, then case-insensitive
   if (zip.files[path]) return zip.files[path];

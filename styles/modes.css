@@ -1,0 +1,330 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   MODES — three experiences × two themes = six designed variants.
+
+   body[data-mode="hybrid|apple|strava"]  picks the shell: type, radius, density
+   html.dark-mode                          picks the theme
+
+   Each variant is its own palette (checked for WCAG AA with
+   scripts/check-contrast.mjs), not a token flip over one palette. Activity-type
+   colours stay Okabe-Ito in every variant (design-system/activity-colors.js).
+
+   Semantic tokens used by the new views:
+     --page      page background          --card       card background
+     --card-2    nested / hover surface   --on-accent  text on an accent fill
+     --ring-*    Move / Exercise / Stand  --font-num   big-numeral face
+   Legacy tokens (--bg, --surface, --accent…) are mapped so the older views
+   (Map, Stats, Photos) pick the variant up too.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Shared across variants ── */
+body.app-fitness {
+  --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --tabbar-h: 0px;
+  --ease-spring: cubic-bezier(0.22, 1.2, 0.36, 1);
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur: 220ms;
+  background: var(--page);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+/* ═══ HYBRID — rounded shell, Strava-orange interaction, Apple-style rings ═══ */
+body.app-fitness[data-mode="hybrid"] {
+  --font-display: 'Nunito', 'Inter', system-ui, sans-serif;
+  --font-num: 'Nunito', 'Inter', system-ui, sans-serif;
+  --radius-sm: 10px; --radius-md: 14px; --radius-lg: 20px;
+  --display-transform: none; --display-tracking: -0.01em; --display-weight: 800;
+
+  --page: #f3f3f7;      --card: #ffffff;     --card-2: #f6f6fa;
+  --bg: #ffffff;       --surface: #f3f3f7;  --surface-2: #ebebf1; --surface-raised: #ffffff; --surface-sunken: #e8e8ee;
+  --border: #e3e3ea;   --border-mid: #c6c6d1;
+  --text: #15151a;     --text-mid: #484855;  --text-muted: #646472;
+  --accent: #c2410c;   --accent-strong: #9a3412; --accent-light: #fff1ea; --accent-quiet: #fff1ea;
+  --on-accent: #ffffff;
+  --ring-move: #e0245e; --ring-exercise: #3f8f00; --ring-stand: #0786a3; --ring-track: #ececf2;
+  --shadow-card: 0 1px 2px rgba(20,20,30,.05), 0 4px 16px rgba(20,20,30,.06);
+}
+html.dark-mode body.app-fitness[data-mode="hybrid"] {
+  --page: #0b0b0f;      --card: #17171d;     --card-2: #1f1f27;
+  --bg: #17171d;       --surface: #0b0b0f;  --surface-2: #22222b; --surface-raised: #1f1f27; --surface-sunken: #060608;
+  --border: #2a2a34;   --border-mid: #40404d;
+  --text: #f4f4f8;     --text-mid: #c2c2cf;  --text-muted: #9393a3;
+  --accent: #ff8a4c;   --accent-strong: #ffb088; --accent-light: #2b1a10; --accent-quiet: #2b1a10;
+  --on-accent: #1a0c04;
+  --ring-move: #ff4d86; --ring-exercise: #a4f23a; --ring-stand: #2dd4e6; --ring-track: #2a2a34;
+  --shadow-card: 0 1px 2px rgba(0,0,0,.5), 0 6px 20px rgba(0,0,0,.4);
+}
+
+/* ═══ APPLE — near-black canvas, rounded numerals, ring colours, spring motion ═══ */
+body.app-fitness[data-mode="apple"] {
+  --font-display: 'Nunito', 'Inter', system-ui, sans-serif;
+  --font-num: 'Nunito', 'Inter', system-ui, sans-serif;
+  --radius-sm: 12px; --radius-md: 18px; --radius-lg: 26px;
+  --display-transform: none; --display-tracking: -0.015em; --display-weight: 800;
+
+  --page: #f2f2f7;      --card: #ffffff;     --card-2: #f7f7fb;
+  --bg: #ffffff;       --surface: #f2f2f7;  --surface-2: #e9e9f0; --surface-raised: #ffffff; --surface-sunken: #e5e5ec;
+  --border: #e1e1e8;   --border-mid: #c4c4cf;
+  --text: #0c0c10;     --text-mid: #44444f;  --text-muted: #62626e;
+  --accent: #d3144a;   --accent-strong: #a60f3a; --accent-light: #ffe9ef; --accent-quiet: #ffe9ef;
+  --on-accent: #ffffff;
+  --ring-move: #e11d5a; --ring-exercise: #3d8b00; --ring-stand: #0688a4; --ring-track: #ebebf1;
+  --shadow-card: 0 1px 2px rgba(20,20,30,.04), 0 8px 28px rgba(20,20,30,.07);
+}
+html.dark-mode body.app-fitness[data-mode="apple"] {
+  --page: #000000;      --card: #1c1c1e;     --card-2: #2c2c2e;
+  --bg: #1c1c1e;       --surface: #000000;  --surface-2: #2c2c2e; --surface-raised: #2c2c2e; --surface-sunken: #000000;
+  --border: #2f2f33;   --border-mid: #48484d;
+  --text: #ffffff;     --text-mid: #d0d0d6;  --text-muted: #a0a0a8;
+  --accent: #ff5c86;   --accent-strong: #ff8fae; --accent-light: #34101c; --accent-quiet: #34101c;
+  --on-accent: #1a0008;
+  --ring-move: #ff2d6f; --ring-exercise: #b6f54a; --ring-stand: #27e1e8; --ring-track: #2c2c2e;
+  --shadow-card: none;
+}
+
+/* ═══ STRAVA — dense, square-cornered cards, condensed display type ═══ */
+body.app-fitness[data-mode="strava"] {
+  --font-display: 'Barlow Condensed', 'Inter', system-ui, sans-serif;
+  --font-num: 'Barlow Condensed', 'Inter', system-ui, sans-serif;
+  --radius-sm: 4px; --radius-md: 6px; --radius-lg: 8px;
+  --display-transform: none; --display-tracking: 0.005em; --display-weight: 700;
+
+  --page: #f0f0f3;      --card: #ffffff;     --card-2: #f6f6f8;
+  --bg: #ffffff;       --surface: #f0f0f3;  --surface-2: #e8e8ec; --surface-raised: #ffffff; --surface-sunken: #e4e4e9;
+  --border: #dcdce2;   --border-mid: #bfbfc9;
+  --text: #17171c;     --text-mid: #45454f;  --text-muted: #63636e;
+  --accent: #bc4200;   --accent-strong: #8f3200; --accent-light: #fff0e6; --accent-quiet: #fff0e6;
+  --on-accent: #ffffff;
+  --ring-move: #e0245e; --ring-exercise: #3f8f00; --ring-stand: #0786a3; --ring-track: #e8e8ec;
+  --shadow-card: 0 1px 2px rgba(20,20,30,.08);
+}
+html.dark-mode body.app-fitness[data-mode="strava"] {
+  --page: #101114;      --card: #1b1c21;     --card-2: #23242a;
+  --bg: #1b1c21;       --surface: #101114;  --surface-2: #25262c; --surface-raised: #23242a; --surface-sunken: #0a0a0c;
+  --border: #2c2d34;   --border-mid: #43444d;
+  --text: #f3f3f6;     --text-mid: #c4c4ce;  --text-muted: #9696a2;
+  --accent: #ff7b33;   --accent-strong: #ffa070; --accent-light: #2d1809; --accent-quiet: #2d1809;
+  --on-accent: #1c0b00;
+  --ring-move: #ff4d86; --ring-exercise: #a4f23a; --ring-stand: #2dd4e6; --ring-track: #25262c;
+  --shadow-card: 0 1px 2px rgba(0,0,0,.5);
+}
+
+/* Cards in the new views read from --card; legacy .bs-card follows too. */
+body.app-fitness .bs-card { background: var(--card); box-shadow: none; }
+
+/* ═══ Top bar ═══════════════════════════════════════════════════════════════ */
+
+#app-nav {
+  position: sticky; top: 0; z-index: 900;
+  display: none;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 10px var(--sp-6);
+  padding-left: max(var(--sp-6), env(safe-area-inset-left));
+  padding-right: max(var(--sp-6), env(safe-area-inset-right));
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  border-bottom: 1px solid var(--border);
+  -webkit-backdrop-filter: saturate(1.4) blur(14px);
+  backdrop-filter: saturate(1.4) blur(14px);
+}
+#app-nav.visible { display: flex; }
+
+.nav-brand {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-display);
+  font-size: 19px; font-weight: var(--display-weight);
+  letter-spacing: var(--display-tracking);
+  color: var(--text);
+  white-space: nowrap;
+  text-decoration: none;
+}
+.nav-brand-mark {
+  width: 26px; height: 26px; flex: none;
+  color: var(--accent);
+}
+
+/* Tabs: pills in Apple/Hybrid, underlined text links in Strava. */
+.nav-tabs {
+  display: inline-flex; align-items: center; gap: 2px;
+  margin-left: var(--sp-3);
+  min-width: 0;
+}
+.nav-tab {
+  appearance: none; border: 0; background: transparent;
+  font-family: var(--font-body);
+  font-size: 13.5px; font-weight: 600;
+  color: var(--text-mid);
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 7px;
+  transition: color 120ms, background 120ms;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-tab svg { width: 18px; height: 18px; flex: none; display: none; }
+.nav-tab:hover { color: var(--text); background: var(--surface-2); }
+.nav-tab[aria-selected="true"], .nav-tab.active {
+  background: var(--accent); color: var(--on-accent);
+}
+.nav-tab:disabled { opacity: .45; cursor: not-allowed; }
+.nav-tab .nav-badge {
+  background: color-mix(in srgb, var(--on-accent) 25%, transparent);
+  color: inherit;
+  font-size: 10px; font-weight: 700;
+  padding: 1px 6px; border-radius: 999px; min-width: 18px; text-align: center;
+}
+.nav-tab:not(.active) .nav-badge { background: var(--border); color: var(--text-mid); }
+
+body[data-mode="strava"] .nav-tabs { gap: 4px; }
+body[data-mode="strava"] .nav-tab {
+  border-radius: 0; padding: 14px 12px;
+  font-family: var(--font-display); font-size: 17px; font-weight: 700; letter-spacing: .01em;
+  border-bottom: 3px solid transparent; margin-bottom: -11px;
+}
+body[data-mode="strava"] .nav-tab:hover { background: transparent; color: var(--text); }
+body[data-mode="strava"] .nav-tab[aria-selected="true"], body[data-mode="strava"] .nav-tab.active {
+  background: transparent; color: var(--accent); border-bottom-color: var(--accent);
+}
+body[data-mode="strava"] .nav-tab .nav-badge { background: var(--accent); color: var(--on-accent); }
+
+.nav-actions {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+}
+
+/* Mode switcher (segmented control) */
+.mode-switch {
+  display: inline-flex; padding: 3px; gap: 2px;
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+.mode-switch button {
+  appearance: none; border: 0; background: transparent;
+  font: inherit; font-size: 12.5px; font-weight: 700;
+  color: var(--text-mid);
+  padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  transition: background 120ms, color 120ms;
+  -webkit-tap-highlight-color: transparent;
+}
+.mode-switch button[aria-checked="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+.mode-switch button:disabled { opacity: .4; cursor: not-allowed; }
+.mode-switch button:not(:disabled):hover { color: var(--text); }
+body[data-mode="strava"] .mode-switch, body[data-mode="strava"] .mode-switch button { border-radius: 6px; }
+
+.icon-btn {
+  appearance: none; border: 1px solid var(--border); background: var(--card); color: var(--text);
+  width: 38px; height: 38px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; flex: none;
+  transition: background 120ms, border-color 120ms;
+  -webkit-tap-highlight-color: transparent;
+}
+.icon-btn:hover { background: var(--surface-2); border-color: var(--border-mid); }
+.icon-btn svg { width: 19px; height: 19px; }
+body[data-mode="strava"] .icon-btn { border-radius: 6px; }
+
+/* Settings popover */
+.menu-wrap { position: relative; }
+.menu-pop {
+  position: absolute; right: 0; top: calc(100% + 8px);
+  min-width: 260px; max-width: calc(100vw - 24px);
+  background: var(--card); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: 0 12px 36px rgba(0,0,0,.22);
+  padding: 8px; z-index: 950;
+}
+.menu-pop[hidden] { display: none; }
+.menu-row { padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
+.menu-row > span { color: var(--text-mid); font-weight: 600; }
+.menu-item {
+  appearance: none; border: 0; background: transparent; color: var(--text);
+  width: 100%; text-align: left; font: inherit; font-size: 13.5px; font-weight: 600;
+  padding: 10px; border-radius: var(--radius-sm); cursor: pointer;
+  display: flex; align-items: center; gap: 10px;
+}
+.menu-item:hover { background: var(--surface-2); }
+.menu-item.danger { color: var(--wrong); }
+.menu-sep { height: 1px; background: var(--border); margin: 6px 4px; }
+.menu-note { padding: 6px 10px 8px; font-size: 11.5px; color: var(--text-muted); line-height: 1.45; }
+
+.unit-toggle { display: inline-flex; padding: 2px; background: var(--surface-2); border-radius: 999px; }
+.unit-toggle button {
+  appearance: none; border: 0; background: transparent; font: inherit; font-size: 12px; font-weight: 700;
+  color: var(--text-mid); padding: 5px 14px; border-radius: 999px; cursor: pointer;
+}
+.unit-toggle button.active { background: var(--accent); color: var(--on-accent); }
+
+/* ═══ Mobile: bottom tab bar, compact top bar ══════════════════════════════ */
+@media (max-width: 760px) {
+  #app-nav {
+    padding: 8px var(--sp-3);
+    padding-top: calc(8px + env(safe-area-inset-top));
+    padding-left: max(var(--sp-3), env(safe-area-inset-left));
+    padding-right: max(var(--sp-3), env(safe-area-inset-right));
+    gap: 8px;
+  }
+  /* backdrop-filter makes an element the containing block for position: fixed
+     descendants, which would pin the tab bar inside the header instead of to the
+     screen bottom. Solid background on phones instead. */
+  #app-nav { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--card); }
+  .nav-brand-name { display: none; }
+  .nav-actions { gap: 6px; }
+  .mode-switch button { padding: 6px 10px; font-size: 12px; }
+  .icon-btn { width: 40px; height: 40px; }
+
+  .nav-tabs {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 910;
+    margin: 0; padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    display: flex; justify-content: space-around; gap: 0;
+    background: color-mix(in srgb, var(--card) 92%, transparent);
+    -webkit-backdrop-filter: saturate(1.4) blur(16px);
+    backdrop-filter: saturate(1.4) blur(16px);
+    border-top: 1px solid var(--border);
+  }
+  .nav-tab, body[data-mode="strava"] .nav-tab {
+    flex: 1 1 0; min-width: 0;
+    flex-direction: column; gap: 3px;
+    padding: 6px 2px; border-radius: 12px; margin: 0;
+    font-family: var(--font-body); font-size: 10.5px; font-weight: 700; letter-spacing: 0;
+    border-bottom: 0;
+    background: transparent; color: var(--text-muted);
+  }
+  .nav-tab svg { display: block; width: 23px; height: 23px; }
+  .nav-tab:hover, body[data-mode="strava"] .nav-tab:hover { background: transparent; color: var(--text); }
+  .nav-tab[aria-selected="true"], .nav-tab.active,
+  body[data-mode="strava"] .nav-tab[aria-selected="true"], body[data-mode="strava"] .nav-tab.active {
+    background: transparent; color: var(--accent); border: 0;
+  }
+  .nav-tab .nav-badge { position: absolute; transform: translate(14px, -12px); }
+  .nav-tab { position: relative; }
+
+  /* Content clears the fixed bar. */
+  body.app-fitness { padding-bottom: calc(var(--tabbar-h) + 0px); }
+  body.map-fullscreen .nav-tabs { display: none; }
+}
+
+@media (max-width: 380px) {
+  .mode-switch button { padding: 6px 8px; font-size: 11.5px; }
+  .nav-tab { font-size: 10px; }
+}
+
+/* ═══ Motion ═══════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Visible keyboard focus everywhere. */
+body.app-fitness :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.sr-only {
+  position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}

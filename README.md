@@ -1,40 +1,44 @@
 # Fitness Visualizer
 
-A **100% client-side** fitness data visualizer. Drop in your Strava or Apple Health export and see a heatmap of every route you've ever recorded, per-activity charts, and a photo tour that pairs your camera roll with the workout that was happening when each shot was taken.
+A **100% client-side** fitness app. Drop in your Strava and/or Apple Health export and get an activity feed, per-activity analysis (splits, pace / heart-rate / elevation charts, best efforts), Apple-style Activity Rings, trends and awards, a heatmap of every route, and a photo tour that pairs your camera roll with the workout it was taken during.
 
-Your files never leave the browser. There is no server, no account, no cloud storage.
+Your files never leave the browser. There is no server, no account, no cloud storage. Your data is saved *in your browser* (IndexedDB) so it's still there next visit, and **Menu → Delete my data** wipes it.
 
 **Live app:** https://colemccall.github.io/exercise-visualizer/
 
 ---
 
-## Features
+## Three experiences, one data set
 
-### Navigation
+The app opens in **Hybrid**; the switcher in the top bar changes the whole look and feel. A mode that needs a source you haven't loaded is disabled.
 
-A persistent top bar with **Map / Stats & Charts / Photos** tabs — three sibling views instead of one long scroll. Upload is a modal (auto-opens on first visit, reachable anytime via "Upload data"). Two complete themes — light and dark are each independently designed and WCAG AA checked, not a token flip on top of one palette — with the activity-type colors (Run/Ride/Walk/Hike/Swim) using the colorblind-safe Okabe-Ito palette so every type stays distinguishable under the common forms of color blindness. See [design-system/fitness-theme.md](design-system/fitness-theme.md) for the full token reference.
+| | **Hybrid** (default) | **Apple** | **Strava** |
+|---|---|---|---|
+| Data | everything, duplicates merged | Apple Health workouts + rings | Strava activities |
+| Landing | **Today**: rings, trends, latest activity | **Summary**: rings, trends, recent workouts | **Feed**: activity cards with route thumbnails |
+| Nav | Today · Feed · Map · Awards · Stats · Photos | Summary · Workouts · Awards · Map · Photos | Feed · Map · Profile · Photos |
+| Feel | rounded type, orange accent, rings | near-black canvas, rounded numerals, spring motion | dense cards, condensed type, data-first |
 
-### Map view
+Every mode comes in **light** (default) and **dark**, each independently designed and WCAG AA checked (`npm run contrast`), not a token flip over one palette. Activity-type colours use the colour-blind-safe Okabe-Ito palette in every variant. The layout is built for both phone (bottom tab bar, 44px targets) and desktop.
 
-The map *is* the page: it fills the window, and the numbers live on the Stats tab.
+### What's in it
 
-- **Heatmap** of every GPS route with two styles:
-  - *By type* — coloured per activity
-  - *Frequency* — each route coloured by how many separate activities share its path, on a sequential ramp with a legend giving the real visit counts. Your daily loop burns hot; a one-off route stays a saturated cool colour rather than fading into the basemap.
-- **Routes are the interface** — hover one to preview it, click to pin a card with its distance, duration, pace, climb and heart rate, then jump to the full activity detail or zoom the map to just that route. <kbd>Esc</kbd> or a click on empty map clears it.
-- Zooms to street level (z20 — individual buildings), and opens framed on the area you actually train in rather than zoomed out to fit one holiday abroad
-- A slim strip along the bottom holds **Locations / By Month / Timelapse**; it stays folded until you pick one, and **Expand map** (or <kbd>F</kbd>) hides even that
+- **Activity rings** (Move / Exercise / Stand) for a day, week or month, with streaks, from Apple's own ActivitySummary. No Apple data → no rings (nothing is estimated).
+- **Trends**: last 90 days against the past year, Apple-style.
+- **Awards**: distance, streaks, consistency, personal records, monthly challenge and ring badges, with progress toward the next ones.
+- **Feed** with route thumbnails, month totals and a "this week" panel.
+- **Activity page** (`#/activity/<id>`, linkable): route map coloured by pace or heart rate, headline numbers, **splits**, **best efforts** (400 m → marathon for runs, 5–40 km for rides, with PR badges), and synced elevation / pace / heart-rate / cadence / power charts: scrub any chart and a marker follows along the route.
+- **Profile / Stats**: yearly totals with a year selector, distance by month against the previous year, weekly consistency, per-type breakdown, ~30 derived statistics, filters, and the classic charts.
+- **Map**: heatmap of every GPS route (by type, or by frequency), hover/click routes for a card, zoom to street level, Locations / By Month / Timelapse tools. Drawn on canvas, so it stays smooth with hundreds of routes.
+- **Duplicate merging**: a workout recorded by both an Apple Watch and Strava is shown once, taking the route, name and distance from Strava and heart rate and energy from Apple.
+- **Photo Tour** and **Share as video**, below.
+- **Persistence** (IndexedDB), metric / imperial toggle, keyboard-accessible dialogs, reduced-motion support.
 
-### Stats & Charts view
+Strava routes are read from `.gpx`, `.gpx.gz`, `.fit` and `.fit.gz` files in the export (a built-in FIT decoder), so most Strava activities get a route, not just the few with GPX.
 
-- **All statistics** — around 30 derived numbers grouped into Volume, Consistency, Records and Heart, each with a one-line explanation of what it means, plus a per-activity-type breakdown table. Record cards are clickable and open that activity.
-- Every section (statistics, filters, activities, charts) collapses from its header, and each chart collapses from its title. What you collapse stays collapsed next visit.
-- Filter by type, date range, month, or free text — every number, chart and record on the page reflects the current filter
-- Deduplication flags the same activity recorded by multiple devices
-- Metric / imperial toggle (persisted, defaults to miles)
-- Monthly distance stacked by activity type, weekly activity calendar, HR zones, personal records, per-activity elevation profile + heart-rate line
+---
 
-### Photos view — Photo Tour
+## Photo Tour
 
 - Drop in photos and/or videos alongside your workouts
 - Each media item is matched to the workout that was underway when it was taken (EXIF timestamp → workout start/end window, adjustable ±0–30 min)
@@ -56,11 +60,6 @@ WebCodecs matters here, not just MediaRecorder: every frame gets an **explicit p
 - Sliders for **animation speed** and **photo pause length**; videos in the tour play through their real duration
 - Output can be saved as `.webm` or `.mp4` (the `.mp4` option just re-wraps the same bytes with an mp4 container tag — most players sniff the format and don't care about the extension; Instagram's stricter uploader may still reject it)
 - Real basemap tiles (Esri's light gray canvas) drawn under the route; moving dot sits exactly on a solid tour polyline (no drift between dot and trace)
-- Monthly distance stacked by activity type
-- Weekly activity calendar
-- HR zones (when data is present)
-- Personal records
-- Per-activity elevation profile + heart-rate line
 
 ---
 
@@ -71,28 +70,34 @@ WebCodecs matters here, not just MediaRecorder: every frame gets an **explicit p
 | **Strava** | strava.com → Settings → My Account → Download or Delete Your Account → Request Your Archive |
 | **Apple Health** | iPhone Health app → profile picture → Export All Health Data |
 
-Drop the resulting ZIP on the matching upload zone. Photos are dragged in loose (JPG / HEIC / MP4 / MOV).
+Load either one, or both. Photos are dragged in loose (JPG / HEIC / MP4 / MOV).
 
 ---
 
 ## Running locally
 
-The app is static — no build step. But ES modules require a real server (not `file://`).
+No build step, but ES modules need a real server (not `file://`).
 
 ```bash
-npx serve .
-# → http://localhost:3000
+npm install        # only for the tests; the app itself has no dependencies to install
+npm run serve      # tiny static server with correct MIME types → http://127.0.0.1:8080
 ```
 
-Or use the VS Code **Live Server** extension.
+`npx serve .` also works. On Windows avoid `python -m http.server`, which serves `.js` as `text/plain`.
 
-> On Windows, avoid `python -m http.server` — it serves `.js` files as `text/plain`, which breaks module loading in strict-MIME browsers.
+### Tests
+
+```bash
+npm test           # Node unit tests: parsers, FIT decoder, dedup merge, analysis (synthetic fixtures)
+npm run contrast   # WCAG AA check of all six mode × theme palettes
+npm run e2e        # real-Chrome smoke test with synthetic exports (skips if Chrome isn't installed)
+```
+
+No personal data is committed; every fixture is generated in the test.
 
 ---
 
 ## Optional: pre-extract photo EXIF (large libraries)
-
-For huge photo collections, browser-side EXIF parsing can be slow. There's an optional Python script that pre-extracts timestamps + GPS and copies photos into `photos/`:
 
 ```bash
 pip install exifread Pillow
@@ -106,47 +111,47 @@ Next page load, `data/photos.json` is picked up automatically. Matching still ru
 ## Architecture
 
 ```
-index.html          — app shell, top nav, view routing markup, upload modal, all CSS
-app.js              — state, upload orchestration, dedup, view routing (Map/Charts/Photos)
-design-system/
-  theme.css         — shared design system (used by sibling apps — see its own README)
-  activity-colors.js— single source of truth for activity-type colors (Okabe-Ito palette)
-  fitness-theme.md  — this app's two-theme token reference
-parsers/
-  strava.js         — CSV + GPX (from ZIP)
-  apple.js          — chunked export.xml + workout-routes/*.gpx
-  gpx.js            — shared GPX trackpoint parser (returns time, ele, hr)
-  photos.js         — EXIF via exifr (photos + video atoms)
-map/
-  heatmap.js        — multi-route Leaflet layer
-  route.js          — single-activity route, coloured by pace or HR
-charts/             — D3 v7 charts (distance, weekly, hr-zones, elevation, records)
-photos/
-  matcher.js        — pair photos to workouts, interpolate GPS from GPX time
-  list.js           — workouts-with-photos list
-  detail.js         — route + photo grid + cinema tour + share modal
-  heic.js           — lazy libheif-js decoder
-  video.js          — first-frame poster capture via <video> + canvas
-  composite.js      — per-frame drawing (basemap tiles + route + dot + media + intro title card)
-  export.js         — video render pipeline (timeline, WebCodecs VideoEncoder, GPS spike filter)
-scripts/
-  prepare_photos.py — optional offline EXIF extractor
+index.html            app shell (nav, upload dialog, view containers) + legacy view CSS
+app.js                orchestrator: nav, modes, theme, routing, upload dialog
+core/
+  state.js            shared store + tiny pub/sub; scoped()/filtered() activity lists
+  modes.js            the three modes: nav, landing, scope
+  router.js           hash router (#/feed, #/activity/<id>, …)
+  store.js            IndexedDB persistence (raw activities, ring summaries, packed routes)
+  upload.js           staging, parsing, merge, background route saving, restore, delete
+  dedup.js            cross-source duplicate detection + reversible merge
+  format.js           units + every number formatter
+  routes.js           lazy trackpoint loading with a concurrency cap
+  ui.js, util.js, collapse.js
+parsers/              strava.js, apple.js, gpx.js, fit.js, photos.js, model.js (activity model v2)
+analysis/             pure, tested logic: streams, splits, efforts, yearly, trends, rings, awards, feed
+views/                today, feed, activity, awards, profile, stats-view, map-view
+components/           rings, badges, icons, route thumbnails, year summary (SVG, no deps)
+charts/               D3 charts (distance, weekly, hr-zones, records, stats) + stream.js (synced)
+map/                  heatmap.js, route.js, tiles.js
+photos/               matcher, list, detail (cinema tour), HEIC, video export pipeline
+styles/               fonts.css, modes.css (6 variants), views.css
+vendor/               Leaflet, JSZip, D3, exifr, libheif, webm-muxer, fonts (self-hosted)
+design-system/        shared theme + activity colours (Okabe-Ito)
+e2e/, tests/          smoke test + unit tests
 ```
 
-### Normalized activity model
+### Normalized activity model (v2)
 
-Every parser produces the same shape so the UI never touches raw source data:
+Every parser produces the same shape so the UI never touches raw source data.
 
 ```javascript
 {
-  id, source, name, type,
+  id, source, name, type, sub_type,            // type is one of Run/Ride/Walk/Hike/Swim/Other
   date: Date,
-  distance_m, duration_s, elevation_gain_m,
-  avg_heart_rate, max_heart_rate,
-  has_route, gpx_file, route_points,
-  _gpxLoader,             // lazy async function
-  has_duplicate,
-  photos: [{id, url, lat, lng, timestamp, interpolated, isHEIC, isVideo}]
+  distance_m, duration_s, moving_s,            // elapsed vs moving time
+  elevation_gain_m, calories_kcal,
+  avg_heart_rate, max_heart_rate, avg_cadence, avg_watts, max_speed_mps,
+  gear, indoor, description, device,
+  has_route, route_points, _gpxLoader,         // lazy; points are {lat,lng,ele,time,hr,cad,watts}
+  sources: ['strava','apple'],                 // after merge
+  merged_into, merged_ids,                     // duplicate merge bookkeeping
+  photos: [...]
 }
 ```
 
@@ -154,16 +159,15 @@ Every parser produces the same shape so the UI never touches raw source data:
 
 ## Privacy
 
-Everything runs in the browser. No fitness data, no photo bytes, and no metadata are sent to any server. The only external HTTP requests are:
+Everything runs in the browser. No fitness data, no photo bytes and no metadata are sent to any server. All scripts and fonts are served from this site (`/vendor`); a Content-Security-Policy enforces that. The only requests the page makes:
 
-- Leaflet tile requests to `arcgisonline.com` (dashboard heatmap basemap)
-- CartoDB tile requests to `basemaps.cartocdn.com` (video export basemap)
-- ESM script downloads from `jsdelivr.net` (D3, exifr, libheif-js) — happens once per page load and is cacheable
+- **Map tiles** from `server.arcgisonline.com` (Esri) and `tile.openstreetmap.org` (street-level zoom), which necessarily reveal the area you're looking at
+- *Only if you press "Name these places"* on the Map's Locations tab: one coordinate per area to OpenStreetMap's Nominatim service. It is off by default; places show as coordinates.
 
-If you want fully offline operation, vendor the CDNs locally.
+Saved data lives in your browser's IndexedDB for this site. **Menu → Delete my data** removes it. Photos are never saved; they're re-read from the files you pick each time.
 
 ---
 
 ## Tech
 
-Vanilla HTML / CSS / JS. Leaflet (maps), D3 v7 (charts), JSZip (ZIP parsing), exifr (EXIF), libheif-js (HEIC decode). No framework, no bundler, no build step.
+Vanilla HTML / CSS / JS (ES modules). Leaflet, D3 v7, JSZip, exifr, libheif-js, all vendored. No framework, no bundler, no build step. `package.json` exists only for the Node tests.

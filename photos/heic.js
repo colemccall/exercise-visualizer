@@ -7,7 +7,8 @@
  * a HEIC photo. If loading fails, callers should fall back to a placeholder.
  */
 
-const LIBHEIF_URL = 'https://cdn.jsdelivr.net/npm/libheif-js@1.17.1/libheif/libheif.js';
+// Vendored (see vendor/): the WASM is inlined in this file.
+const LIBHEIF_URL = new URL('../vendor/libheif/libheif.js', import.meta.url).href;
 
 let _libheifPromise = null;
 let _decoderPromise = null;

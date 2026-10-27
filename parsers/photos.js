@@ -19,7 +19,8 @@
  * }
  */
 
-const EXIFR_URL = 'https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.esm.mjs';
+// Vendored (see vendor/): no third-party script is loaded at runtime.
+const EXIFR_URL = new URL('../vendor/exifr.full.esm.mjs', import.meta.url).href;
 
 let _exifrPromise = null;
 async function loadExifr() {
@@ -131,12 +132,38 @@ export async function parse(input, onProgress = () => {}) {
   return out;
 }
 
+/**
+ * EXIF stores wall-clock time with no zone ("2026:04:10 07:02:00"); exifr hands it
+ * back as a Date read in *this machine's* zone. When the photo also records its UTC
+ * offset (OffsetTimeOriginal, written by iPhones and most Androids) reinterpret the
+ * wall-clock in that offset — otherwise a trip photo viewed from another timezone, or
+ * any photo viewed away from where it was taken, lands hours away from its workout.
+ *
+ * @param {Date} localDate  exifr's Date (wall-clock components in the local zone)
+ * @param {string|null} offset  "+HH:MM" / "-HH:MM" / "Z"
+ * @returns {Date}
+ */
+export function applyExifOffset(localDate, offset) {
+  if (!(localDate instanceof Date) || isNaN(localDate.getTime()) || !offset) return localDate;
+  const m = /^(?:Z|([+-])(\d{2}):?(\d{2}))$/.exec(String(offset).trim());
+  if (!m) return localDate;
+  const minutes = m[1] ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : 0;
+  const wallClockAsUtc = Date.UTC(
+    localDate.getFullYear(), localDate.getMonth(), localDate.getDate(),
+    localDate.getHours(), localDate.getMinutes(), localDate.getSeconds(), localDate.getMilliseconds());
+  return new Date(wallClockAsUtc - minutes * 60000);
+}
+
 function extractTimestamp(meta) {
   if (!meta) return null;
-  // Try image EXIF fields first, then QuickTime/MP4 atom names.
-  const raw = meta.DateTimeOriginal
-           || meta.CreateDate
-           || meta.CreationTime
+  // Image EXIF: wall-clock time, zone from OffsetTime* when present.
+  const exifRaw = meta.DateTimeOriginal || meta.CreateDate;
+  if (exifRaw) {
+    const d = exifRaw instanceof Date ? exifRaw : new Date(exifRaw);
+    if (!isNaN(d.getTime())) return applyExifOffset(d, meta.OffsetTimeOriginal || meta.OffsetTime || null);
+  }
+  // Video: QuickTime/MP4 atoms are already absolute instants.
+  const raw = meta.CreationTime
            || meta.CreationDate       // Apple QuickTime
            || meta.MediaCreateDate    // MP4/MOV standard
            || meta.TrackCreateDate    // MP4 track atom

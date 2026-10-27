@@ -4,6 +4,9 @@
  * Much easier to read than a daily scatter.
  */
 
+import { addTooltip } from './tooltip.js';
+import { escapeHtml } from '../core/util.js';
+
 import { TYPE_COLORS as ACTIVITY_COLORS } from '../design-system/activity-colors.js';
 const TYPES = ['Run', 'Ride', 'Walk', 'Hike', 'Swim', 'Other'];
 
@@ -124,17 +127,3 @@ export function renderDistanceChart(activities, container, units = 'metric') {
   }
 }
 
-function addTooltip(container) {
-  const el = document.createElement('div');
-  el.style.cssText = 'position:fixed;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--text);pointer-events:none;z-index:9000;display:none;box-shadow:0 2px 8px rgba(0,0,0,0.15);line-height:1.6;';
-  document.body.appendChild(el);
-  return {
-    show(event, html) {
-      el.innerHTML = html;
-      el.style.display = 'block';
-      el.style.left = (event.clientX + 12) + 'px';
-      el.style.top  = (event.clientY - 10) + 'px';
-    },
-    hide() { el.style.display = 'none'; },
-  };
-}

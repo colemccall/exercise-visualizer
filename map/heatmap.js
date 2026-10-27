@@ -5,6 +5,7 @@
  */
 
 import { TYPE_COLORS } from '../design-system/activity-colors.js';
+import { makeTileLayers, MAX_MAP_ZOOM } from './tiles.js';
 export { TYPE_COLORS };
 
 let _routeLayerGroup = null;
@@ -19,46 +20,7 @@ function isDark() {
   return document.documentElement.classList.contains('dark-mode');
 }
 
-/* ── Basemaps ────────────────────────────────────────────────────────────────
-   Two stacked layers, because no single keyless source does both jobs well:
-
-     z0-16  Esri's World_Light_Gray_Base — the clean neutral canvas routes read
-            best against. Its tiles stop at z16 ("a few city blocks"), which is
-            why the map used to refuse to go closer.
-     z17-20 OpenStreetMap standard tiles — native to z19, upscaled one step to
-            z20, so you can zoom right down to which side of the street a route
-            ran on.
-
-   CARTO's basemaps.cartocdn.com is deliberately not used: it now stamps
-   "API KEY REQUIRED" across keyless tiles.
-
-   Dark mode inverts the tile pane in CSS (html.dark-mode .leaflet-tile-pane)
-   rather than swapping providers — one basemap, consistent at every zoom, and
-   it finally gives dark mode a dark map to draw routes on.                   */
-const ESRI_GRAY  = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}';
-const OSM_DETAIL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-
-const BASE_OPTS = {
-  maxZoom: 17,        // hands over to the detail layer
-  maxNativeZoom: 16,  // Esri has nothing past 16; upscale the last half-step
-  attribution: 'Tiles &copy; Esri',
-};
-const DETAIL_OPTS = {
-  minZoom: 16.5,
-  maxZoom: 20,
-  maxNativeZoom: 19,
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-};
-
-export const MAX_MAP_ZOOM = 20;
-
-/** Both basemap layers, in draw order. */
-function makeTileLayers() {
-  return [
-    L.tileLayer(ESRI_GRAY, BASE_OPTS),
-    L.tileLayer(OSM_DETAIL, DETAIL_OPTS),
-  ];
-}
+export { MAX_MAP_ZOOM };
 
 let _heatStyle = 'type'; // 'type' | 'frequency'
 
@@ -313,6 +275,9 @@ export function initHeatmap(container, opts = {}) {
     attributionControl: true,
     maxZoom: MAX_MAP_ZOOM,
     zoomSnap: 0.5,   // half-steps for wheel/pinch; +/- still moves a full level
+    // Hundreds of routes as SVG <path>s made hover and pan sluggish; one canvas
+    // keeps it smooth into the thousands. Routes are drawn with L.canvas below.
+    preferCanvas: true,
   });
 
   _tileLayers = makeTileLayers();
@@ -380,7 +345,11 @@ export async function renderHeatmap(activities, map) {
   const overlay = getRouteOverlay(map);
   overlay.style.display = 'block';
 
+  // Bounds only need a sample of the points; keeping all ~650k alive just to
+  // frame the map was wasteful (and spreading them into push() can overflow
+  // the call stack on a long route).
   const allLatLngs = [];
+  const SAMPLE_EVERY = 4;
   const BATCH = 50;
 
   for (let i = 0; i < routable.length; i += BATCH) {
@@ -408,7 +377,7 @@ export async function renderHeatmap(activities, map) {
       });
       attachRouteHandlers(polyline, activity);
       polyline.addTo(_routeLayerGroup);
-      allLatLngs.push(...latLngs);
+      for (let k = 0; k < latLngs.length; k += SAMPLE_EVERY) allLatLngs.push(latLngs[k]);
       _renderedPolylines.push(polyline);
       _renderedActivities.push(activity);
     }

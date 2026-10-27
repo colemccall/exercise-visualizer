@@ -4,21 +4,18 @@
   <meta charset="UTF-8" />
   <!-- viewport-fit=cover lets the page paint into the notch/home-indicator area;
        the safe-area-inset padding in the mobile block below keeps content clear of it. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tile.openstreetmap.org; media-src 'self' blob:; connect-src 'self' blob: https://server.arcgisonline.com https://tile.openstreetmap.org https://nominatim.openstreetmap.org; font-src 'self'; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Fitness Activity Visualizer</title>
-
-  <!-- One-time cleanup: deregisters an earlier COI service worker that
-       broke ESRI tile loading. Safe no-op for users who never had it. -->
-  <script src="./coi-serviceworker.js"></script>
-
-  <!-- Google Fonts -->
-  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <title>Fitness Visualizer</title>
+  <meta name="description" content="See your Strava and Apple Health workouts together. Everything stays in your browser." />
+  <meta name="color-scheme" content="light dark" />
 
   <!-- Design System -->
   <link rel="stylesheet" href="./design-system/theme.css" />
 
   <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="./vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="./styles/fonts.css" />
 
   <style>
     /* -- App shell -- */
@@ -258,76 +255,6 @@
       border-radius: 3px;
       transition: width 0.2s ease;
       width: 0%;
-    }
-
-    /* ─── Persistent top nav ─────────────────────────────── */
-    #app-nav {
-      position: sticky; top: 0; z-index: 900;
-      display: none; /* shown once we have data */
-      align-items: center;
-      gap: var(--sp-3);
-      padding: 10px var(--sp-6);
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      backdrop-filter: saturate(1.2) blur(6px);
-    }
-    #app-nav.visible { display: flex; }
-    .nav-brand {
-      font-family: var(--font-display);
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--text);
-      letter-spacing: 0.02em;
-      white-space: nowrap;
-    }
-    .nav-tabs {
-      display: inline-flex;
-      gap: 4px;
-      padding: 4px;
-      background: var(--surface-2);
-      border-radius: 999px;
-      margin-left: var(--sp-2);
-    }
-    .nav-tab {
-      appearance: none;
-      border: none;
-      background: transparent;
-      font-family: var(--font-body);
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-mid);
-      padding: 6px 14px;
-      border-radius: 999px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: color 120ms, background 120ms;
-    }
-    .nav-tab:hover { color: var(--text); }
-    .nav-tab.active {
-      background: var(--accent);
-      color: #fff;
-    }
-    .nav-tab .nav-badge {
-      background: rgba(255,255,255,0.28);
-      color: #fff;
-      font-size: 10px;
-      font-weight: 700;
-      padding: 1px 6px;
-      border-radius: 999px;
-      min-width: 18px;
-      text-align: center;
-    }
-    .nav-tab:not(.active) .nav-badge {
-      background: var(--border);
-      color: var(--text-mid);
-    }
-    .nav-actions {
-      margin-left: auto;
-      display: inline-flex;
-      align-items: center;
-      gap: var(--sp-2);
     }
 
     /* ─── View containers ───────────────────────────────── */
@@ -1558,35 +1485,6 @@
        used to do exactly that: ~635px of content in a 390px bar.
        ═══════════════════════════════════════════════════════════════ */
     @media (max-width: 700px) {
-      /* Nav becomes two rows: brand + actions, then a full-width tab bar. */
-      #app-nav {
-        flex-wrap: wrap;
-        gap: var(--sp-2);
-        padding: 8px var(--sp-3);
-        padding-top: calc(8px + env(safe-area-inset-top));
-        padding-left: calc(var(--sp-3) + env(safe-area-inset-left));
-        padding-right: calc(var(--sp-3) + env(safe-area-inset-right));
-      }
-      .nav-brand {
-        font-size: 15px;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .nav-actions { margin-left: auto; gap: 6px; }
-      .nav-tabs {
-        order: 3;
-        width: 100%;
-        margin-left: 0;
-        justify-content: space-between;
-      }
-      .nav-tab { flex: 1; justify-content: center; padding: 10px 8px; }
-
-      /* "Upload data" keeps its folder icon but drops the label — the label is
-         what pushed this row past the viewport. aria-label carries the meaning. */
-      .nav-btn-label { display: none; }
-      #btn-open-upload { padding: 8px 12px !important; font-size: 16px !important; }
-
       /* Filters stack instead of forming a long single line. */
       .filter-row { padding: var(--sp-3); gap: var(--sp-2); }
       .filter-row input[type="search"] { max-width: none !important; flex: 1 1 100% !important; }
@@ -2321,57 +2219,69 @@
       .chart-card .chart-title.card-toggle { min-height: 44px; }
     }
   </style>
+  <link rel="stylesheet" href="./styles/modes.css" />
+  <link rel="stylesheet" href="./styles/views.css" />
 </head>
-<body class="app-fitness">
+<body class="app-fitness" data-mode="hybrid">
+<a class="skip-link" href="#main">Skip to content</a>
 
 <!-- ================================================================
-     PERSISTENT TOP NAV (shown once we have data)
+     TOP BAR (shown once we have data). Tabs are built by app.js per mode;
+     under 760px they become a fixed bottom tab bar.
 ================================================================ -->
-<nav id="app-nav" role="navigation" aria-label="Main">
-  <div class="nav-brand">&#127939; Fitness Visualizer</div>
-  <div class="nav-tabs" role="tablist">
-    <button class="nav-tab active" data-view="map" role="tab">Map</button>
-    <button class="nav-tab" data-view="charts" role="tab">Stats &amp; Charts</button>
-    <button class="nav-tab" data-view="photos" role="tab" id="nav-tab-photos">
-      Photos <span class="nav-badge" id="nav-photos-badge" hidden></span>
-    </button>
-  </div>
+<nav id="app-nav" aria-label="Main">
+  <a class="nav-brand" href="#/" aria-label="Fitness Visualizer home">
+    <span id="brand-mark"></span><span class="nav-brand-name">Fitness Visualizer</span>
+  </a>
+  <div class="nav-tabs" id="nav-tabs"></div>
   <div class="nav-actions">
-    <div class="unit-toggle">
-      <button id="btn-metric">km</button>
-      <button id="btn-imperial" class="active">mi</button>
+    <div class="mode-switch" id="mode-switch" role="radiogroup" aria-label="Experience"></div>
+    <button type="button" class="icon-btn" id="btn-theme-toggle" aria-label="Switch to dark mode" aria-pressed="false"></button>
+    <div class="menu-wrap">
+      <button type="button" class="icon-btn" id="btn-menu" aria-haspopup="true" aria-expanded="false" aria-controls="menu-pop" aria-label="Settings and data"></button>
+      <div class="menu-pop" id="menu-pop" hidden>
+        <div class="menu-row"><span id="units-lbl">Units</span>
+          <div class="unit-toggle" role="group" aria-labelledby="units-lbl">
+            <button type="button" id="btn-metric">km</button>
+            <button type="button" id="btn-imperial" class="active">mi</button>
+          </div>
+        </div>
+        <div class="menu-sep"></div>
+        <button type="button" class="menu-item" id="btn-open-upload"></button>
+        <button type="button" class="menu-item danger" id="btn-delete-data"></button>
+        <p class="menu-note" id="menu-note">Everything stays in this browser. Nothing is uploaded anywhere.</p>
+      </div>
     </div>
-    <button class="bs-btn bs-btn-secondary" id="btn-open-upload" style="font-size:12px; padding:6px 14px;" aria-label="Upload data">&#128194;<span class="nav-btn-label"> Upload data</span></button>
-    <button class="tl-btn" id="btn-theme-toggle" style="font-size:12px;">🌙</button>
   </div>
 </nav>
 
+<div id="duplicate-banner" role="status" hidden>
+  <span class="dup-text"><strong><span id="dup-count">0</span> workouts</strong> appear in both Strava and Apple Watch; each is shown once.</span>
+  <button type="button" class="dup-btn-review" id="btn-dup-review">Show merged</button>
+  <button type="button" class="dup-btn-dismiss" id="btn-dup-dismiss" aria-label="Dismiss">&times;</button>
+</div>
+
 <!-- ================================================================
-     UPLOAD MODAL (was full-screen; now overlay)
+     UPLOAD DIALOG
 ================================================================ -->
 <div class="upload-modal-backdrop" id="upload-modal-backdrop">
-<div id="upload-screen">
+<div id="upload-screen" role="dialog" aria-modal="true" aria-labelledby="upload-title" tabindex="-1">
   <div class="bs-card upload-modal-inner">
-    <button class="upload-modal-close" id="btn-close-upload" title="Close" aria-label="Close">&times;</button>
+    <button type="button" class="upload-modal-close" id="btn-close-upload" title="Close" aria-label="Close">&times;</button>
 
-    <!-- Upload screen header -->
-    <div style="display:flex; align-items:center; justify-content:space-between; padding:var(--sp-4) var(--sp-6); border-bottom:1px solid var(--border);">
-      <span style="font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--text); letter-spacing:0.02em;">&#127939; Fitness Visualizer</span>
-      <button class="tl-btn" id="btn-theme-toggle-upload" style="font-size:12px;">🌙 Dark</button>
+    <div class="upload-head">
+      <h1 id="upload-title">Fitness Visualizer</h1>
+      <p>See your Strava and Apple Health workouts together: routes, rings, trends and a photo tour.</p>
     </div>
 
-    <!-- Privacy notice -->
-    <div class="bs-privacy" style="margin-top: var(--sp-5);">
-      <strong>&#128274; 100% Private:</strong> Your fitness data is processed entirely in your browser.
-      No files are uploaded to any server. Your data never leaves your device.
+    <div class="bs-privacy">
+      <strong>Private by design.</strong> Your files are read in this browser and never uploaded.
+      They&rsquo;re saved on this device so they&rsquo;re here next time, and you can delete them anytime from the menu.
+      The only requests this page makes are map tiles.
     </div>
 
-    <!-- Upload zones -->
     <div class="upload-instructions">
-      <div class="bs-display-md" style="margin-bottom:var(--sp-4); color:var(--text);">
-        Load Your Activity Data
-      </div>
-
+      <h2 class="upload-sub">Load your activity data <span>(either one, or both)</span></h2>
       <div class="bs-upload-zones" id="upload-zones">
 
         <!-- Strava -->
@@ -2379,8 +2289,8 @@
           <!-- MIME types alongside the extensions: the iOS Files picker resolves
                `accept` to UTIs and greys out ZIPs when given bare extensions.
                application/octet-stream is the catch-all iOS falls back to. -->
-          <input type="file" id="file-strava" accept=".zip,.csv,.gpx,application/zip,application/x-zip-compressed,text/csv,application/octet-stream" style="display:none" multiple aria-label="Choose Strava export file" />
-          <div class="bs-upload-icon">&#129984;</div>
+          <input type="file" id="file-strava" accept=".zip,.csv,.gpx,application/zip,application/x-zip-compressed,text/csv,application/octet-stream" class="sr-only" multiple aria-label="Choose Strava export file" />
+          <div class="bs-upload-icon"><svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 3 5.5 13.5H11L10 21l7.5-10.5H12z"/></svg></div>
           <div class="bs-upload-name">Strava</div>
           <label for="file-strava" class="upload-choose-btn" id="sub-strava">Choose ZIP file</label>
           <div id="filelist-strava" class="staged-file-list"></div>
@@ -2393,15 +2303,15 @@
                 <li>Click "Request Your Archive" &mdash; you&rsquo;ll get an email with a link</li>
                 <li>Download the <strong>ZIP file</strong> and upload it here</li>
               </ol>
-              <p style="margin-top:8px;color:var(--text-muted);">Note: Only activities with .gpx files will show on the heatmap.</p>
+              <p style="margin-top:8px;color:var(--text-muted);">Routes are read from the .gpx and .fit files in the export.</p>
             </div>
           </details>
         </div>
 
         <!-- Apple Health -->
         <div class="bs-upload-zone" id="zone-apple" data-source="apple">
-          <input type="file" id="file-apple" accept=".zip,.xml,application/zip,application/x-zip-compressed,text/xml,application/xml,application/octet-stream" style="display:none" multiple aria-label="Choose Apple Health export file" />
-          <div class="bs-upload-icon">&#127822;</div>
+          <input type="file" id="file-apple" accept=".zip,.xml,application/zip,application/x-zip-compressed,text/xml,application/xml,application/octet-stream" class="sr-only" multiple aria-label="Choose Apple Health export file" />
+          <div class="bs-upload-icon"><svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.4C19.5 15.4 12 20 12 20z"/></svg></div>
           <div class="bs-upload-name">Apple Watch</div>
           <label for="file-apple" class="upload-choose-btn" id="sub-apple">Choose file</label>
           <div id="filelist-apple" class="staged-file-list"></div>
@@ -2420,15 +2330,12 @@
 
       </div><!-- /.bs-upload-zones -->
 
-      <!-- Photos + videos (optional) -->
-      <div class="bs-display-md" style="margin-top:var(--sp-6); margin-bottom:var(--sp-3); color:var(--text); font-size:16px;">
-        Add Photos &amp; Videos <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(optional — pairs media with the workout that was happening)</span>
-      </div>
+      <h2 class="upload-sub photos">Add photos &amp; videos <span>(optional: pins them to the workout they were taken during)</span></h2>
       <div class="bs-upload-zones" id="photo-zones">
 
         <div class="bs-upload-zone" id="zone-photos" data-source="photos">
-          <input type="file" id="file-photos" accept="image/*,video/*,.heic,.heif,.mov,.mp4,.m4v" style="display:none" multiple aria-label="Choose photo or video files" />
-          <div class="bs-upload-icon">&#128247;</div>
+          <input type="file" id="file-photos" accept="image/*,video/*,.heic,.heif,.mov,.mp4,.m4v" class="sr-only" multiple aria-label="Choose photo or video files" />
+          <div class="bs-upload-icon"><svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="5.5" width="17" height="13" rx="3"/><circle cx="9" cy="11" r="1.6"/><path d="m4 17 5-4.5 4 3.5 3-2.5 4.5 3.5"/></svg></div>
           <div class="bs-upload-name">Photos &amp; Videos</div>
           <label for="file-photos" class="upload-choose-btn" id="sub-photos">Choose files</label>
           <div id="filelist-photos" class="staged-file-list"></div>
@@ -2442,48 +2349,38 @@
 
       </div><!-- /#photo-zones -->
 
-      <!-- Go button -->
+      <div id="upload-error" role="alert" hidden></div>
+
       <div class="go-row">
         <div class="go-file-summary" id="go-file-count"></div>
-        <button class="go-btn" id="btn-go" disabled>
-          Analyze &rarr;
-        </button>
+        <button type="button" class="go-btn" id="btn-go" disabled>Analyze &rarr;</button>
       </div>
 
-      <!-- Progress bar -->
-      <div id="progress-container" style="margin-top:var(--sp-4);">
+      <div id="progress-container" role="status">
         <div class="progress-label" id="progress-label">Parsing files&hellip;</div>
-        <div class="progress-track">
-          <div class="progress-fill" id="progress-fill"></div>
-        </div>
+        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
       </div>
-
-    </div><!-- /.upload-instructions -->
-
-  </div><!-- /.bs-card -->
-</div><!-- /#upload-screen -->
-</div><!-- /.upload-modal-backdrop -->
-
+    </div>
+  </div>
+</div>
+</div>
 
 <!-- ================================================================
-     DASHBOARD SCREEN  (full-width)
+     VIEWS
 ================================================================ -->
+<main id="main" tabindex="-1">
+<section id="welcome" class="view-shell welcome" hidden>
+  <h1 class="view-title">Fitness Visualizer</h1>
+  <p class="view-sub">Load a Strava or Apple Health export to see your workouts, routes, rings and trends. Everything stays in your browser.</p>
+  <button type="button" class="bs-btn bs-btn-primary" id="btn-welcome-upload">Load your data</button>
+</section>
 <div id="dashboard-screen">
-  <div class="bs-card" style="margin-bottom:var(--sp-4);">
 
-    <!-- Duplicate banner (hidden until duplicates found) -->
-    <div id="duplicate-banner" style="display:none;">
-      <span class="dup-icon">&#9888;</span>
-      <span class="dup-text">
-        <strong><span id="dup-count">0</span> possible duplicate pairs</strong> found across your sources.
-        Same activity recorded by multiple devices will appear twice.
-      </span>
-      <button class="dup-btn-review" id="btn-dup-review">Review duplicates</button>
-      <button class="dup-btn-dismiss" id="btn-dup-dismiss">&times;</button>
-    </div>
+  <section class="app-view" data-view="today" id="view-today" aria-label="Today"></section>
+  <section class="app-view" data-view="feed" id="view-feed" aria-label="Activity feed"></section>
+  <section class="app-view" data-view="activity" id="view-activity" aria-label="Activity"></section>
 
-    <!-- ══════ MAP VIEW ══════ -->
-    <section class="app-view active" data-view="map" id="view-map">
+  <section class="app-view" data-view="map" id="view-map">
 
     <!-- Heatmap + Explore panel -->
     <div id="heatmap-explore-wrapper">
@@ -2491,8 +2388,8 @@
         <div id="heatmap"></div>
         <div class="map-controls">
           <div class="heatmap-style-toggle" role="group" aria-label="Route color style">
-            <button type="button" class="hm-style-btn active" data-style="type">By type</button>
-            <button type="button" class="hm-style-btn" data-style="frequency">Frequency</button>
+            <button type="button" class="hm-style-btn active" data-style="type" aria-pressed="true">By type</button>
+            <button type="button" class="hm-style-btn" data-style="frequency" aria-pressed="false">Frequency</button>
           </div>
           <button type="button" class="map-icon-btn" id="btn-map-fullscreen"
                   aria-pressed="false" title="Fill the screen with the map (F, or Esc to exit)">
@@ -2531,10 +2428,10 @@
 
       <div id="explore-panel">
         <div class="explore-head">
-          <div class="explore-tabs">
-            <button class="etab active" data-tab="locations">Locations</button>
-            <button class="etab" data-tab="months">By Month</button>
-            <button class="etab" data-tab="timelapse">Timelapse</button>
+          <div class="explore-tabs" role="tablist" aria-label="Map tools">
+            <button class="etab active" data-tab="locations" role="tab" aria-selected="true">Locations</button>
+            <button class="etab" data-tab="months" role="tab" aria-selected="false" tabindex="-1">By Month</button>
+            <button class="etab" data-tab="timelapse" role="tab" aria-selected="false" tabindex="-1">Timelapse</button>
           </div>
           <button type="button" class="panel-toggle" id="btn-explore-collapse"
                   data-collapse="explore" aria-expanded="false"
@@ -2547,19 +2444,19 @@
         <div class="collapsible-body" id="explore-panel-body">
 
         <!-- Locations tab -->
-        <div class="etab-pane active" id="etab-locations">
+        <div role="tabpanel" class="etab-pane active" id="etab-locations">
           <div id="locations-list" style="font-size:12px;color:var(--text-muted);">
             Load activities with GPS routes to see top locations.
           </div>
         </div>
 
         <!-- By Month tab -->
-        <div class="etab-pane" id="etab-months">
+        <div role="tabpanel" class="etab-pane" id="etab-months">
           <!-- populated by JS -->
         </div>
 
         <!-- Timelapse tab -->
-        <div class="etab-pane" id="etab-timelapse">
+        <div role="tabpanel" class="etab-pane" id="etab-timelapse">
           <p class="tl-panel-hint">Animate your routes chronologically &mdash; oldest to newest. Each route flashes as it's added.</p>
           <div style="display:flex;gap:var(--sp-2);margin-bottom:var(--sp-3);">
             <button class="tl-play-btn" id="tl-play-btn" style="flex:1;">&#9654; Play</button>
@@ -2585,253 +2482,122 @@
 
     </section><!-- /#view-map -->
 
-    <!-- ══════ STATS & CHARTS VIEW ══════ -->
-    <section class="app-view" data-view="charts" id="view-charts">
+  <section class="app-view" data-view="awards" id="view-awards" aria-label="Awards"></section>
+  <section class="app-view" data-view="profile" id="view-profile" aria-label="Profile"></section>
 
-    <div class="view-intro">
-      <span class="view-intro-text">
-        Everything here describes the activities currently in view &mdash; change the filters
-        and every number, chart, and record updates with them.
-      </span>
-      <button type="button" class="bs-btn bs-btn-secondary view-intro-btn" id="btn-collapse-all"
-              style="font-size:12px;padding:6px 12px;">Collapse all sections</button>
-    </div>
+  <!-- ══════ STATS & CHARTS ══════ -->
+  <section class="app-view" data-view="charts" id="view-charts" aria-label="Stats and charts">
+    <div class="view-shell stats-shell">
+      <header class="view-head">
+        <h1 class="view-title">Stats</h1>
+        <p class="view-sub">Everything here describes the activities in view. Change the filters and every number and chart follows.</p>
+        <button type="button" class="bs-btn bs-btn-secondary" id="btn-collapse-all">Collapse all sections</button>
+      </header>
 
-    <!-- Stats bar — 6 headline stats -->
-    <div class="stats-bar">
-      <div class="bs-stat">
-        <div class="bs-stat-num" id="stat-total">&mdash;</div>
-        <div class="bs-stat-lbl">Activities</div>
-      </div>
-      <div class="bs-stat">
-        <div class="bs-stat-num" id="stat-distance">&mdash;</div>
-        <div class="bs-stat-lbl">Total Distance</div>
-      </div>
-      <div class="bs-stat">
-        <div class="bs-stat-num" id="stat-time">&mdash;</div>
-        <div class="bs-stat-lbl">Moving Time</div>
-      </div>
-      <div class="bs-stat">
-        <div class="bs-stat-num" id="stat-elevation">&mdash;</div>
-        <div class="bs-stat-lbl">Elevation Gain</div>
-      </div>
-      <div class="bs-stat">
-        <div class="bs-stat-num" id="stat-pace">&mdash;</div>
-        <div class="bs-stat-lbl">Avg Pace</div>
-      </div>
-      <div class="bs-stat">
-        <div class="bs-stat-num" id="stat-range">&mdash;</div>
-        <div class="bs-stat-lbl">Date Range</div>
-      </div>
-    </div>
+      <div id="stats-year"></div>
 
-    <!-- ── All statistics ── -->
-    <section class="panel" id="panel-stats" data-panel="stats">
-      <h2 class="panel-head">
-        <button type="button" class="panel-toggle panel-head-btn" data-collapse="stats" aria-expanded="true">
-          <span class="panel-chevron" aria-hidden="true">&#9662;</span>
-          <span class="panel-title">All statistics</span>
-          <span class="panel-sub">Volume, consistency, records, heart rate &amp; per-type breakdown</span>
-        </button>
-      </h2>
-      <div class="collapsible-body panel-body" id="stats-detail"></div>
-    </section>
+      <div class="stats-bar">
+        <div class="bs-stat"><div class="bs-stat-num" id="stat-total">&mdash;</div><div class="bs-stat-lbl">Activities</div></div>
+        <div class="bs-stat"><div class="bs-stat-num" id="stat-distance">&mdash;</div><div class="bs-stat-lbl">Total distance</div></div>
+        <div class="bs-stat"><div class="bs-stat-num" id="stat-time">&mdash;</div><div class="bs-stat-lbl">Moving time</div></div>
+        <div class="bs-stat"><div class="bs-stat-num" id="stat-elevation">&mdash;</div><div class="bs-stat-lbl">Elevation gain</div></div>
+        <div class="bs-stat"><div class="bs-stat-num" id="stat-pace">&mdash;</div><div class="bs-stat-lbl">Avg pace</div></div>
+        <div class="bs-stat"><div class="bs-stat-num" id="stat-range">&mdash;</div><div class="bs-stat-lbl">Date range</div></div>
+      </div>
 
-    <!-- ── Filters ── -->
-    <section class="panel" id="panel-filters" data-panel="filters">
-      <h2 class="panel-head">
-        <button type="button" class="panel-toggle panel-head-btn" data-collapse="filters" aria-expanded="true">
-          <span class="panel-chevron" aria-hidden="true">&#9662;</span>
-          <span class="panel-title">Filters</span>
-          <span class="panel-sub" id="filters-summary">Showing everything</span>
-        </button>
-      </h2>
-      <div class="collapsible-body">
-    <!-- Filter row -->
-    <div class="filter-row">
-      <input type="search" id="filter-search" placeholder="Search activities&hellip;" style="flex:1;min-width:140px;max-width:260px;" />
-      <label>Type</label>
-      <select id="filter-type">
-        <option value="All">All</option>
-        <option value="Run">Run</option>
-        <option value="Ride">Ride</option>
-        <option value="Walk">Walk</option>
-        <option value="Hike">Hike</option>
-        <option value="Swim">Swim</option>
-        <option value="Other">Other</option>
-      </select>
-      <label>From</label>
-      <input type="date" id="filter-from" />
-      <label>To</label>
-      <input type="date" id="filter-to" />
-      <label class="dup-filter-label">
-        <input type="checkbox" id="filter-dup-only" />
-        Duplicates only
-      </label>
-      <button class="bs-btn-ghost bs-btn" id="btn-clear-filters" style="font-size:12px;">Clear</button>
-    </div>
-      </div><!-- /.collapsible-body -->
-    </section><!-- /#panel-filters -->
-
-    <!-- ── Activities ── -->
-    <section class="panel" id="panel-activities" data-panel="activities">
-      <h2 class="panel-head">
-        <button type="button" class="panel-toggle panel-head-btn" data-collapse="activities" aria-expanded="true">
-          <span class="panel-chevron" aria-hidden="true">&#9662;</span>
-          <span class="panel-title">Activities</span>
-          <span class="panel-sub" id="list-count-label">&nbsp;</span>
-        </button>
-      </h2>
-      <div class="collapsible-body">
-        <div id="activity-list-container">
-          <div id="activity-list"></div>
+      <section class="panel" id="panel-filters" data-panel="filters">
+        <h2 class="panel-head">
+          <button type="button" class="panel-toggle panel-head-btn" data-collapse="filters" aria-expanded="true">
+            <span class="panel-chevron" aria-hidden="true">&#9662;</span>
+            <span class="panel-title">Filters</span>
+            <span class="panel-sub" id="filters-summary">Showing everything</span>
+          </button>
+        </h2>
+        <div class="collapsible-body">
+          <div class="filter-row">
+            <label class="sr-only" for="filter-search">Search activities</label>
+            <input type="search" id="filter-search" placeholder="Search activities&hellip;" autocomplete="off" />
+            <label for="filter-type">Type</label>
+            <select id="filter-type">
+              <option value="All">All</option><option value="Run">Run</option><option value="Ride">Ride</option>
+              <option value="Walk">Walk</option><option value="Hike">Hike</option><option value="Swim">Swim</option><option value="Other">Other</option>
+            </select>
+            <label for="filter-from">From</label><input type="date" id="filter-from" />
+            <label for="filter-to">To</label><input type="date" id="filter-to" />
+            <label class="dup-filter-label" for="filter-dup-only"><input type="checkbox" id="filter-dup-only" /> Merged workouts only</label>
+            <button type="button" class="bs-btn bs-btn-ghost" id="btn-clear-filters">Clear</button>
+          </div>
         </div>
-      </div>
-    </section><!-- /#panel-activities -->
+      </section>
 
-    <!-- ── Charts ── -->
-    <section class="panel" id="panel-charts" data-panel="charts">
-      <h2 class="panel-head">
-        <button type="button" class="panel-toggle panel-head-btn" data-collapse="charts" aria-expanded="true">
-          <span class="panel-chevron" aria-hidden="true">&#9662;</span>
-          <span class="panel-title">Charts</span>
-          <span class="panel-sub">Each chart collapses on its own &mdash; click its title</span>
-        </button>
-      </h2>
-      <div class="collapsible-body">
-    <!-- Charts row -->
-    <div class="charts-row">
+      <section class="panel" id="panel-stats" data-panel="stats">
+        <h2 class="panel-head">
+          <button type="button" class="panel-toggle panel-head-btn" data-collapse="stats" aria-expanded="true">
+            <span class="panel-chevron" aria-hidden="true">&#9662;</span>
+            <span class="panel-title">All statistics</span>
+            <span class="panel-sub">Volume, consistency, records, heart rate &amp; per-type breakdown</span>
+          </button>
+        </h2>
+        <div class="collapsible-body panel-body" id="stats-detail"></div>
+      </section>
 
-      <div class="chart-card" style="grid-column: span 2;">
-        <button type="button" class="chart-title card-toggle" aria-expanded="true">
-          <span class="panel-chevron" aria-hidden="true">&#9662;</span>Monthly Distance
-        </button>
-        <div class="collapsible-body"><div id="chart-distance"></div></div>
-      </div>
+      <section class="panel" id="panel-charts" data-panel="charts">
+        <h2 class="panel-head">
+          <button type="button" class="panel-toggle panel-head-btn" data-collapse="charts" aria-expanded="true">
+            <span class="panel-chevron" aria-hidden="true">&#9662;</span>
+            <span class="panel-title">Charts</span>
+            <span class="panel-sub">Each chart collapses on its own</span>
+          </button>
+        </h2>
+        <div class="collapsible-body">
+          <div class="charts-row">
+            <div class="chart-card" style="grid-column: span 2;">
+              <button type="button" class="chart-title card-toggle" aria-expanded="true"><span class="panel-chevron" aria-hidden="true">&#9662;</span>Monthly distance</button>
+              <div class="collapsible-body"><div id="chart-distance"></div></div>
+            </div>
+            <div class="chart-card" style="grid-column: span 2;">
+              <button type="button" class="chart-title card-toggle" aria-expanded="true"><span class="panel-chevron" aria-hidden="true">&#9662;</span>Activity calendar</button>
+              <div class="collapsible-body"><div id="chart-weekly"></div></div>
+            </div>
+            <div class="chart-card">
+              <button type="button" class="chart-title card-toggle" aria-expanded="true"><span class="panel-chevron" aria-hidden="true">&#9662;</span>Personal records</button>
+              <div class="collapsible-body"><div id="chart-records"></div></div>
+            </div>
+            <div class="chart-card" id="chart-hr-card" style="display:none;">
+              <button type="button" class="chart-title card-toggle" aria-expanded="true"><span class="panel-chevron" aria-hidden="true">&#9662;</span>Heart-rate zones</button>
+              <div class="collapsible-body">
+                <label class="maxhr" for="maxhr-input">Max heart rate <input id="maxhr-input" type="number" min="120" max="230" inputmode="numeric" /> bpm</label>
+                <div id="chart-hr-zones"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </section><!-- /#view-charts -->
 
-      <div class="chart-card" style="grid-column: span 2;">
-        <button type="button" class="chart-title card-toggle" aria-expanded="true">
-          <span class="panel-chevron" aria-hidden="true">&#9662;</span>Activity Calendar
-        </button>
-        <div class="collapsible-body"><div id="chart-weekly"></div></div>
-      </div>
-
-      <div class="chart-card">
-        <button type="button" class="chart-title card-toggle" aria-expanded="true">
-          <span class="panel-chevron" aria-hidden="true">&#9662;</span>Personal Records
-        </button>
-        <div class="collapsible-body"><div id="chart-records"></div></div>
-      </div>
-
-      <div class="chart-card" id="chart-hr-card" style="display:none;">
-        <button type="button" class="chart-title card-toggle" aria-expanded="true">
-          <span class="panel-chevron" aria-hidden="true">&#9662;</span>HR Zones
-        </button>
-        <div class="collapsible-body"><div id="chart-hr-zones"></div></div>
-      </div>
-
-    </div><!-- /.charts-row -->
-      </div><!-- /.collapsible-body -->
-    </section><!-- /#panel-charts -->
-
-    </section><!-- /#view-charts -->
-
-  </div><!-- /.bs-card -->
 </div><!-- /#dashboard-screen -->
-
 
 <!-- ================================================================
      PHOTOS SCREEN
 ================================================================ -->
 <div id="photos-screen">
-  <div class="bs-card" style="margin-bottom:var(--sp-4);">
+  <div class="bs-card">
     <div class="header-controls">
-      <span class="dash-title">&#128247; Photo Tour</span>
-      <button class="bs-btn bs-btn-secondary" id="btn-photos-back" style="font-size:12px; padding:6px 14px;">
-        &larr; Back to dashboard
-      </button>
+      <span class="dash-title">Photo Tour</span>
+      <button type="button" class="bs-btn bs-btn-secondary" id="btn-photos-back">&larr; Back</button>
     </div>
-    <div id="photos-screen-body" class="photos-screen-inner">
-      <!-- populated by JS -->
-    </div>
+    <div id="photos-screen-body" class="photos-screen-inner"></div>
   </div>
-</div><!-- /#photos-screen -->
+</div>
+</main>
 
+<div id="bs-toast" role="status" aria-live="polite"></div>
 
-<!-- ================================================================
-     ACTIVITY DETAIL PANEL (slide-in)
-================================================================ -->
-<div id="detail-overlay">
-  <div id="detail-panel">
-
-    <div class="detail-header">
-      <div>
-        <div class="detail-title" id="detail-name">Activity</div>
-        <div class="detail-subtitle" id="detail-meta"></div>
-      </div>
-      <button class="detail-close" id="btn-close-detail">&times;</button>
-    </div>
-
-    <!-- Route map -->
-    <div id="detail-route-map"></div>
-
-    <!-- Stats grid -->
-    <div class="detail-stats">
-      <div class="bs-stat">
-        <div class="bs-stat-num" id="dstat-distance">&mdash;</div>
-        <div class="bs-stat-lbl">Distance</div>
-      </div>
-      <div class="bs-stat">
-        <div class="bs-stat-num" id="dstat-duration">&mdash;</div>
-        <div class="bs-stat-lbl">Duration</div>
-      </div>
-      <div class="bs-stat">
-        <div class="bs-stat-num" id="dstat-pace">&mdash;</div>
-        <div class="bs-stat-lbl">Avg Pace</div>
-      </div>
-      <div class="bs-stat">
-        <div class="bs-stat-num" id="dstat-elevation">&mdash;</div>
-        <div class="bs-stat-lbl">Elev Gain</div>
-      </div>
-      <div class="bs-stat">
-        <div class="bs-stat-num" id="dstat-avg-hr">&mdash;</div>
-        <div class="bs-stat-lbl">Avg HR</div>
-      </div>
-      <div class="bs-stat">
-        <div class="bs-stat-num" id="dstat-max-hr">&mdash;</div>
-        <div class="bs-stat-lbl">Max HR</div>
-      </div>
-    </div>
-
-    <!-- Elevation chart -->
-    <div class="detail-chart-section" id="detail-elevation-section" style="display:none;">
-      <div class="chart-title">Elevation Profile</div>
-      <div id="detail-elevation-chart"></div>
-    </div>
-
-    <!-- HR over time chart -->
-    <div class="detail-chart-section" id="detail-hr-section" style="display:none;">
-      <div class="chart-title">Heart Rate</div>
-      <div id="detail-hr-chart"></div>
-    </div>
-
-  </div><!-- /#detail-panel -->
-</div><!-- /#detail-overlay -->
-
-
-<!-- Toast -->
-<div id="bs-toast"></div>
-
-
-<!-- ================================================================
-     EXTERNAL LIBRARIES (CDN)
-================================================================ -->
-<!-- Leaflet JS -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<!-- JSZip -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-
-<!-- App modules (ES modules) -->
+<!-- Libraries are vendored under /vendor: no third-party script is loaded. -->
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="vendor/d3.min.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

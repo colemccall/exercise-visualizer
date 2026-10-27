@@ -12,58 +12,38 @@ what the app *does*. This file covers what a contributor needs to know.
 
 ## Current State
 
-**Built and working:**
-- Persistent top nav with three sibling views: **Map / Stats & Charts / Photos**.
-  Upload is a modal (auto-opens on first visit, reachable anytime via "Upload data").
-- The Map view is just the map: it sizes itself to the viewport, routes are
-  hover/click interactive, and the tools strip (Locations / By Month /
-  Timelapse) stays folded until asked for. No stats live there.
-- Collapsible sections on the Stats view (see "Collapsible panels" below) plus a
-  full-screen map mode.
-- Two complete themes (light + dark), each independently designed and WCAG AA
-  checked — not a token flip over one palette. Activity colors use the
-  colorblind-safe Okabe-Ito palette.
-- Parsers: `strava.js`, `apple.js`, `gpx.js`, `photos.js`
-- Normalized Activity model — every parser emits the same shape
-- Dedup: flags the same workout recorded by both sources
-- Heatmap (By Type / Frequency styles, each with a legend), route hover/select
-  card, Locations / By Month / Timelapse strip
-- Charts: monthly distance, weekly calendar, HR zones, personal records,
-  per-activity elevation + HR line
-- `charts/stats.js`: ~30 derived statistics (volume, consistency, streaks,
-  records, heart rate, per-type breakdown) on the Stats view
-- Photo Tour: EXIF-timestamp → workout matching, GPS interpolation from GPX,
-  cinema tour playback, HEIC + MP4/MOV support
-- Video export via WebCodecs (`VideoEncoder` + JS WebM muxer), with camera style,
-  route pacing, cinematic intro, speed/pause sliders
-- Metric/imperial toggle (localStorage, defaults to miles)
-- GPS spike filtering
+**Rebuilt 2026-10-27** (Phase 0 + 1 of docs/ROADMAP.md). What exists:
 
-**Validated against real exports** (2026-08-10) — see "Real Test Data" below.
-Both sources parse end-to-end and the full Map/Charts flow renders with no
-uncaught errors. Four bugs were found and fixed in that pass; see git log.
+- **Three experiences by dataset** — Hybrid (default), Apple, Strava — each in light (default) and
+  dark: six designed variants, WCAG AA-checked by `npm run contrast`. See "Modes" below.
+- Views: **Today/Summary** (rings, trends, awards, recent), **Feed/Workouts**, **Activity page**
+  (`#/activity/<id>`: splits, best efforts, synced stream charts), **Map**, **Awards**, **Profile**
+  (yearly stats), **Stats** (the legacy ~30 statistics, filters, D3 charts), **Photos** (Photo Tour).
+- IndexedDB persistence; a reload restores data without re-parsing. "Delete my data" in the menu.
+- Duplicate workouts across Strava and Apple are **merged**, not just flagged.
+- Strava routes from `.gpx`, `.gpx.gz`, `.fit`, `.fit.gz` (own FIT decoder, `parsers/fit.js`).
+  The real export is mostly FIT: before the decoder only 67 of 441 activities had a route; now 375.
+- All third-party code is vendored under `vendor/`; a CSP meta tag forbids anything else.
+- Unit tests (`npm test`), contrast check, and a real-Chrome smoke test (`npm run e2e`).
 
-**Re-validated 2026-09-23** with the Strava export (441 activities, 70 routes)
-through Playwright at 1440px, 390px and 375px: both heat styles in both themes,
-zoom to z20 via the control, wheel and double-click, the viewport-height map
-layout, route hover/pin/zoom/detail, full-screen map, every collapse toggle,
-filters driving the stats, and the unit toggle. No console errors;
-`scrollWidth === innerWidth` on both phone widths.
+Validated against the real exports on 2026-10-27 through Playwright at 1440px and 390/375px, all
+three modes, both themes: no console errors, `scrollWidth === innerWidth` on every view.
 
 Note on "it didn't change after a push": GitHub Pages serves `index.html` with
-`cache-control: max-age=600` and browsers cache ES modules aggressively, so a
-deploy can take ten minutes to show up — or need a hard reload. Confirm what is
-actually live by fetching the file (`curl .../map/heatmap.js`) before chasing a
-bug that is really a cached build.
+`cache-control: max-age=600` and browsers cache ES modules aggressively, so a deploy can take ten
+minutes to show up — or need a hard reload. Confirm what is actually live by fetching the file
+(`curl .../views/feed.js`) before chasing a bug that is really a cached build.
 
-**Not yet built / known gaps:**
-- [ ] Photo Tour cinema view has not been audited on a narrow viewport (the rest
-      of the app has — see "Mobile / iOS" below)
-- [ ] Web Worker for Apple XML parsing — only needed if a real export freezes the
-      tab. It does not today: a 875MB `export.xml` streams in ~4s (see below).
-- [ ] Share card (html2canvas summary PNG)
+**Known gaps:**
+- [ ] Photo Tour + video export against real photos and a phone (not exercised in any pass;
+      `photos/composite.js` basemap provider changed 2026-09-23). The cinema view isn't audited narrow.
+- [ ] Physical iPhone: real Files-app upload, Safari memory on a large Apple ZIP.
+- [ ] Web Worker for parsing — only if a real export is measured to freeze. FIT decode of all 375
+      routes takes ~12s on the main thread (chunked with yields; single routes are tens of ms).
+- [ ] Share card (html2canvas PNG); Phase 2 ideas in docs/ROADMAP.md.
+- [ ] Awards titles are miles-based English strings from `analysis/awards.js`; progress text honours units.
 
-No auth. No data stored between sessions.
+No auth. Data is stored only in this browser (IndexedDB), never sent anywhere.
 
 ## Sources
 
@@ -74,77 +54,53 @@ export to test against; recover it from git history if it's ever wanted back.
 
 ## Tech Stack
 
-Vanilla HTML/CSS/JS. Leaflet + D3 v7 (ESM) + JSZip + exifr + libheif-js via CDN.
-No framework, no bundler, no build step.
+Vanilla HTML/CSS/JS (ES modules). Leaflet + D3 v7 + JSZip are classic `<script>` tags from `vendor/`
+(globals `L`, `d3`, `JSZip`); exifr, libheif-js and webm-muxer are vendored and dynamically imported.
+No framework, no bundler, no build step. `package.json` exists only for the Node tests (jsdom, jszip,
+playwright-core as dev deps).
 
 **Requires a local server** — ES module imports won't work from `file://`:
 ```bash
-npx serve .
+npm run serve        # e2e/server.mjs: correct MIME types, http://127.0.0.1:8080
 ```
-Avoid `python -m http.server` on Windows — it serves `.js` as `text/plain`, which
-breaks module loading.
+Avoid `python -m http.server` on Windows — it serves `.js` as `text/plain`, which breaks module loading.
+
+**CSP**: `index.html` has a Content-Security-Policy meta tag (`default-src 'self'`, tiles from Esri/OSM,
+Nominatim for the opt-in place names). Adding a new external host means editing that tag, deliberately.
 
 ## Key Files
 
 ```
-index.html              — app shell, top nav, view markup, upload modal, ALL CSS
-app.js                  — state, upload orchestration, dedup, view routing,
-                          filters, activity list, explore panel, timelapse
-design-system/
-  theme.css             — shared design system (also used by sibling apps)
-  activity-colors.js    — single source of truth for activity-type colors
-  fitness-theme.md      — this app's two-theme token reference
-parsers/
-  gpx.js                — shared GPX trackpoint parser (DOMParser-based)
-  strava.js             — activities.csv + lazy GPX from ZIP
-  apple.js              — streamed export.xml + workout-routes/*.gpx
-  photos.js             — EXIF via exifr (photos + video atoms)
-charts/
-  stats.js              — derived statistics (computeStats + two renderers)
-  distance.js           — monthly distance, stacked by type
-  weekly.js             — weekly activity calendar
-  hr-zones.js           — % time in 5 HR zones
-  elevation.js          — elevation profile + HR line (detail view)
-  records.js            — personal records
-map/
-  heatmap.js            — multi-route Leaflet layer
-  route.js              — single route, colored by pace or HR
-photos/
-  matcher.js            — pair photos to workouts, interpolate GPS from GPX time
-  list.js               — workouts-with-photos list
-  detail.js             — route + photo grid + cinema tour + share modal
-  heic.js               — lazy libheif-js decoder
-  video.js              — first-frame poster capture
-  composite.js          — per-frame drawing (tiles + route + dot + media + intro)
-  export.js             — video render pipeline (timeline, WebCodecs, spike filter)
-scripts/
-  prepare_photos.py     — optional offline EXIF extractor
-coi-serviceworker.js    — retired; MP4 export no longer needs COI headers
+index.html            shell: nav, upload dialog, view containers, legacy view CSS (Map/Stats/Photos)
+app.js                orchestrator only: nav + mode switch + theme + routing + upload dialog
+core/                 state (store + pub/sub), modes, router, store (IndexedDB), upload, dedup,
+                      format (units), routes (lazy loading), ui (toast/modal/layout), collapse, util
+parsers/              strava, apple, gpx, fit, photos, model (createActivity)
+analysis/             PURE logic, unit-tested, no DOM: streams, splits, efforts, yearly, trends,
+                      rings, awards, feed, dates
+views/                today, feed, activity, awards, profile, stats-view, map-view
+components/           rings, badge, icons, thumb (route SVG), year-summary
+charts/               D3: distance, weekly, hr-zones, records, stats, stream (synced), tooltip
+map/                  heatmap (canvas), route (single route + scrub marker), tiles (shared basemap)
+photos/               matcher, list, detail, heic, video, composite, export
+styles/               fonts.css, modes.css (tokens for 6 variants + nav), views.css
+vendor/               third-party code and self-hosted fonts
+design-system/        theme.css (shared with sibling apps), activity-colors.js, fitness-theme.md
+tests/ e2e/ scripts/  unit tests, smoke test + static server, check-contrast.mjs, prepare_photos.py
 ```
 
-## Normalized Activity Model
+## Normalized Activity Model (v2)
 
-Every parser returns this — the UI never reads raw source data:
-```javascript
-{
-  id: String,                    // "strava-12345678"
-  source: "strava"|"apple",
-  name: String,
-  type: "Run"|"Ride"|"Walk"|"Hike"|"Swim"|"Other",
-  date: Date,                    // always a real instant — see timezone note below
-  distance_m: Number,            // always meters internally
-  duration_s: Number,            // always seconds
-  elevation_gain_m: Number|null,
-  avg_heart_rate: Number|null,
-  max_heart_rate: Number|null,
-  has_route: Boolean,
-  gpx_file: String|null,         // ZIP-internal path
-  route_points: null,            // populated on demand
-  _gpxLoader: async () => Point[], // lazy route loader, attached by the parser
-  has_duplicate: false,          // set by dedup logic in app.js
-  photos: [...],                 // attached by photos/matcher.js
-}
-```
+Every parser returns this (`parsers/model.js createActivity()`); the UI never reads raw source data.
+See README for the field list. Things that are easy to get wrong:
+
+- `duration_s` is *elapsed* time; `moving_s` is moving time (Strava Moving Time; Apple: same as duration).
+  Show `moving_s || duration_s` and label it honestly.
+- `sources` is `['strava']`, `['apple']` or both after a merge. `merged_into` is set on the *secondary*
+  record; everything user-facing must skip records with `merged_into` (`state.scoped()` does).
+- Route points are `{lat,lng,ele,time,hr,cad,watts}`; `route_points` is lazy — always go through
+  `core/routes.js ensureRoute()`. FIT tracks have GPS dropouts, so raw haversine over points can exceed the
+  session distance; splits/charts use the smoothing in `analysis/streams.js`.
 
 ### Timezone gotcha (bit us once — don't regress it)
 
@@ -164,21 +120,41 @@ workout's *creation* date in local time, so matching them to a workout's UTC
 calendar day mislabels — and it only ever fired for workouts that genuinely have
 no route (yoga, strength), handing them someone else's GPS trace.
 
+## Modes (Hybrid / Apple / Strava)
+
+`core/modes.js` is a registry: each mode has a nav list, a landing view and a source scope. A mode is
+only a *shell* (nav, landing, type, radius, density, which activities are in scope) — it never touches
+parsing. The app defaults to **hybrid**; `restoreMode()` only honours a saved mode while its source is
+still loaded. `body[data-mode]` + `html.dark-mode` select one of six token sets in `styles/modes.css`.
+
+- Add/rename a nav entry: `core/modes.js`. Add a view: a `<section data-view>` in `index.html`, a renderer in
+  `app.js` `renderers`, and a module in `views/`.
+- Colour tokens: `--page --card --card-2 --accent --on-accent --ring-* --font-display --font-num`.
+  **Use `--on-accent` for text on accent fills** (white fails AA on the dark accents). After touching a
+  palette run `npm run contrast`.
+- Rendering is lazy: events (`data filters units theme mode`) mark every view dirty and only the visible
+  one re-renders; the Map view and Activity page always re-render on show.
+- Stats-style numbers must use `moving_s`, units must go through `core/format.js`.
+- "Now" for trends / this-week is `dataAnchor()` — an export is a snapshot, so if the newest activity is
+  >3 weeks old it anchors there instead of today (otherwise "last 90 days" is empty).
+
+## Data flow & persistence
+
+`core/upload.js parseStaged()` → parse each source → **save raw activities to IndexedDB (before merging;
+merging mutates)** → `rebuildMerge()` (`core/dedup.js`, reversible via `_premerge`) → `emit('data')`.
+`saveRoutesInBackground()` then decodes every route once and stores it packed in typed arrays
+(`core/store.js`), so the next visit's `_gpxLoader` reads from IndexedDB. `restoreSaved()` runs at boot.
+Photos are never persisted. Bumping `SCHEMA` in `core/store.js` discards older saved data.
+
 ## Collapsible Panels
 
-Anything carrying `data-collapse="<key>"` is a toggle. The section it folds is
-its closest `.panel` / `.chart-card` / `#explore-panel` ancestor, which gets the
-`collapsed` class; CSS then hides that section's `.collapsible-body`. State is
-persisted per key under `fitness-collapsed:<key>`, because the usual reason to
-collapse something here is "leave the map big" and that shouldn't reset on
-reload. `initCollapsibles()` in `app.js` wires all of it, including the chart
-cards (keyed by their chart div's id) and the "Collapse all sections" button.
-
-**D3 charts must be re-drawn after expanding.** They size to
-`container.clientWidth`, which is 0 while the section is hidden, and fall back
-to a placeholder width. `redrawCharts()` is called when a card or the charts
-panel expands and when the Stats view becomes visible — don't remove those
-calls, the charts come back stretched otherwise.
+Anything carrying `data-collapse="<key>"` is a toggle (`core/collapse.js`); the section it folds is its
+closest `.panel` / `.chart-card` / `#explore-panel`, which gets `collapsed`. State persists under
+`fitness-collapsed:<key>`. **D3 charts must be re-drawn after expanding** (they size to
+`container.clientWidth`, 0 while hidden): `initCollapsibles(onChange)` is wired to `redrawCharts()`, and
+a ResizeObserver on `#view-charts` redraws on width changes. Charts must never be wider than their
+container: grid items need `min-width: 0` / `minmax(0,1fr)` or an over-wide SVG stretches the whole page
+(this bit twice: the weekly calendar and a 53-cell year strip).
 
 ## Map View Layout
 
@@ -267,7 +243,7 @@ bundle). A hardcoded `km` slipped into the weekly calendar's tooltip that way.
 
 ## Mobile / iOS
 
-Audited on 2026-08-10 at iPhone 13 (390px), iPhone SE (375px), and landscape.
+Audited 2026-08-10 and re-checked 2026-10-27 after the rebuild at 390px and 375px.
 
 **The rule that matters: nothing may be wider than the viewport.** When any element
 overflows horizontally, mobile browsers shrink the *entire page* to fit — the app
@@ -281,8 +257,9 @@ Traps already handled — don't undo them:
   With four tabs plus the "Hide panel" button that pushed the last tab off the
   clipped edge of the panel on a 390px screen; the mobile rule restores
   shrinking and wrapping.
-- **Nav** wraps to two rows below 700px; the "Upload data" label is hidden (icon +
-  `aria-label` remain).
+- **Nav**: under 760px the tabs become a fixed bottom tab bar (icons + labels) and the top bar keeps
+  brand mark, mode switch, theme and menu. `--nav-h` and `--tabbar-h` are measured in JS
+  (`syncNavHeight`); the Map view is `100dvh - nav - tabbar`.
 - **Charts grid** needs `grid-column: 1 / -1 !important` on the cards. Two carry an
   inline `grid-column: span 2`, which outranks any stylesheet rule, and the grid
   then invents an implicit column that collapses a sibling card to ~40px.
@@ -331,49 +308,26 @@ Note `export_105992264.zip` is a Strava export, not Garmin as previously assumed
 
 ### Testing approach
 
-Two levels, both worth doing:
-
-1. **Parsers headless in Node.** Copy `parsers/*.js` to a scratch dir, add a
-   `package.json` with `{"type":"module"}` so Node treats them as ESM, then shim
-   the two browser globals they assume:
-   ```javascript
-   global.JSZip = JSZip;                              // npm jszip
-   global.DOMParser = new JSDOM('').window.DOMParser; // npm jsdom
-   ```
-   A Node `Buffer` with a `.name` property works in place of a `File`. Fast to
-   iterate, and lets you assert on counts/dates directly.
-
-2. **Real browser.** Chrome is installed locally, so `playwright-core` can drive
-   it without downloading a browser:
-   ```javascript
-   chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe' })
-   ```
-   Feed the real ZIPs through `#file-strava` / `#file-apple` with
-   `setInputFiles`, click **Analyze →**, then wait on `.stats-bar` having digits.
-   Watch for zero-size Leaflet containers — `invalidateSize()` cannot rescue an
-   element whose CSS height resolves to 0.
-
-   The heatmap's Leaflet instance is exposed as `window.__heatmapMap` for
-   exactly this — `setZoom`/`setView` it directly rather than clicking the zoom
-   control N times.
-
-   Useful assertions: route strokes are plain SVG paths under `#heatmap`, so
-   `getAttribute('stroke')` tells you what a heat style actually painted, and
-   `document.documentElement.scrollWidth` vs `window.innerWidth` is the mobile
-   overflow check from "Mobile / iOS".
+1. **`npm test`** — Node unit tests over synthetic fixtures (`tests/parsers`, `tests/analysis`). Parsers run
+   headless with the two browser globals shimmed in `tests/parsers/fixtures.js` (JSZip, jsdom's DOMParser);
+   a Node `Buffer` with a `.name` stands in for a `File`. No personal data is ever committed.
+2. **`npm run e2e`** — `e2e/smoke.mjs`: real Chrome (playwright-core, no download — uses the installed
+   Chrome via `executablePath`), synthetic exports, covers upload → hybrid/light defaults → merge → activity
+   page → modes → dark → reload-restores → 390px overflow → delete.
+3. **Real exports, by hand**: drive the app with `setInputFiles` on `#file-strava` / `#file-apple`, click
+   `#btn-go`, wait for `#app-nav.visible`. Block map tiles with `page.route` for speed. Handy: `window.__heatmapMap`
+   is the Leaflet instance; route strokes are canvas now (not SVG paths), so test with map state, not `stroke`
+   attributes. The mobile overflow check is `document.documentElement.scrollWidth - innerWidth`; when it fails,
+   list elements whose `getBoundingClientRect().right` exceeds the viewport.
 
 ---
 
 ## Remaining Work (Ordered)
 
-1. **Photo Tour + video export against real photos** — the photo pipeline and
-   WebCodecs export have not been exercised in either validation pass (only
-   workouts were). Use the GPX folder plus a real camera roll. Check the cinema
-   tour on a phone while you're there; it's the one surface the mobile pass
-   didn't cover. Note `photos/composite.js` changed basemap provider on
-   2026-09-23 (CARTO → Esri, see "Basemaps and Zoom"); exported frames have not
-   been eyeballed since.
-2. **Verify on a physical iPhone** — real Files-app upload and Safari memory on a
-   large Apple Health ZIP. Emulation can't answer either.
-3. Web Worker for Apple parsing — only if a real export is measured to freeze.
-4. Share card (html2canvas summary PNG).
+1. **Photo Tour + video export against real photos**, and the cinema tour on a phone. Not exercised in
+   any pass. Check exported frames after the 2026-09-23 basemap change.
+2. **Physical iPhone**: real Files-app upload; Safari memory on a large Apple ZIP (routes for ~800 activities
+   are held in memory — consider decimating for display).
+3. Phase 2 from docs/ROADMAP.md: photo story replay, offline PWA + encrypted backup, coverage exploration
+   (needs street data), cross-source analytics, year-in-review card.
+4. Web Worker for parsing, only if measured to freeze.

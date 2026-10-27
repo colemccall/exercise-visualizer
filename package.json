@@ -1,0 +1,17 @@
+{
+  "name": "fitness-visualizer",
+  "private": true,
+  "type": "module",
+  "description": "Client-side fitness data visualizer. package.json exists only for the Node test suite; the app itself has no build step.",
+  "scripts": {
+    "test": "node --test tests/",
+    "e2e": "node e2e/smoke.mjs",
+    "serve": "node e2e/server.mjs",
+    "contrast": "node scripts/check-contrast.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0",
+    "jszip": "^3.10.1",
+    "playwright-core": "^1.48.2"
+  }
+}

@@ -1,18 +1,72 @@
 /**
  * parsers/gpx.js
  * Shared GPX parser — parses a GPX XML string and returns an array of
- * track points: [{ lat, lng, ele, hr, time }, ...]
+ * track points: [{ lat, lng, ele, time, hr, cad, watts }, ...]
  *
  * Handles:
  *  - Standard GPX <trkpt> elements with <ele> and <time>
- *  - Garmin TrackPointExtension heart rate: <gpxtpx:hr> or <ns3:hr>
- *  - Generic <extensions><hr> heart rate
+ *  - Garmin TrackPointExtension heart rate / cadence: <gpxtpx:hr>, <gpxtpx:cad>
+ *  - Generic <extensions><hr> heart rate, <power>/<watts> power
  */
+
+/**
+ * Read a File/Blob/Buffer as UTF-8 text. Browsers give us File (has .text());
+ * the Node test harness hands over a Buffer with a .name property.
+ * @param {File|Blob|Uint8Array} file
+ * @returns {Promise<string>}
+ */
+export async function readText(file) {
+  if (typeof file.text === 'function') return file.text();
+  return new TextDecoder('utf-8').decode(file);
+}
+
+/**
+ * gunzip a byte array to UTF-8 text via the platform DecompressionStream
+ * (Chrome 80+, Firefox 113+, Safari 16.4+, Node 18+).
+ * @param {Uint8Array} bytes
+ * @returns {Promise<string>}
+ */
+export async function gunzipToText(bytes) {
+  return new TextDecoder('utf-8').decode(await gunzipToBytes(bytes));
+}
+
+/**
+ * gunzip a byte array to raw bytes (FIT files are binary, not text).
+ * @param {Uint8Array} bytes
+ * @returns {Promise<Uint8Array>}
+ */
+export async function gunzipToBytes(bytes) {
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error('This browser cannot decompress .gz files (no DecompressionStream)');
+  }
+  const ds = new DecompressionStream('gzip');
+  const writer = ds.writable.getWriter();
+  // Not awaited: the write only settles once the readable side is consumed.
+  writer.write(bytes).catch(() => {});
+  writer.close().catch(() => {});
+  return new Uint8Array(await new Response(ds.readable).arrayBuffer());
+}
+
+/**
+ * Read a ZIP entry holding a GPX track — plain `.gpx` or gzipped `.gpx.gz`
+ * (sniffed by the gzip magic bytes, not just the name) — and parse it.
+ * @param {object} zipEntry  JSZip file entry
+ * @returns {Promise<Array>}
+ */
+export async function loadGpxEntry(zipEntry) {
+  const bytes = await zipEntry.async('uint8array');
+  const gzipped = bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+  const text = gzipped
+    ? await gunzipToText(bytes)
+    : new TextDecoder('utf-8').decode(bytes);
+  return parseGPX(text);
+}
 
 /**
  * Parse a GPX XML string into an array of track points.
  * @param {string} gpxText  Raw GPX file content
- * @returns {{ lat: number, lng: number, ele: number|null, hr: number|null, time: Date|null }[]}
+ * @returns {{ lat: number, lng: number, ele: number|null, hr: number|null,
+ *              cad: number|null, watts: number|null, time: Date|null }[]}
  */
 export function parseGPX(gpxText) {
   const parser = new DOMParser();
@@ -44,14 +98,16 @@ export function parseGPX(gpxText) {
     const timeEl = trkpt.querySelector('time');
     const time = timeEl ? new Date(timeEl.textContent.trim()) : null;
 
-    // Heart rate — try several namespaced and non-namespaced locations
-    const hr = extractHR(trkpt);
+    // Heart rate / cadence / power — namespaced and non-namespaced locations
+    const { hr, cad, watts } = extractSensors(trkpt);
 
     points.push({
       lat,
       lng,
       ele: isNaN(ele) ? null : ele,
       hr,
+      cad,
+      watts,
       time: time && !isNaN(time.getTime()) ? time : null,
     });
   }
@@ -60,46 +116,63 @@ export function parseGPX(gpxText) {
 }
 
 /**
- * Extract heart rate from a <trkpt> element.
- * Checks (in order):
- *   1. Garmin extension: <gpxtpx:hr> (namespace prefix varies)
- *   2. Any element named "hr" inside <extensions>
- *   3. <heartrate> element (some Strava exports)
+ * Extract heart rate, cadence and power from a <trkpt>'s <extensions>.
+ * Elements are matched by local name (DOMParser drops the namespace prefix),
+ * anywhere under <extensions>:
+ *   hr / heartrate / heart_rate   → hr      (1–299)
+ *   cad / cadence                 → cad     (> 0)
+ *   power / watts                 → watts   (> 0)
  *
  * @param {Element} trkpt
- * @returns {number|null}
+ * @returns {{ hr: number|null, cad: number|null, watts: number|null }}
  */
-function extractHR(trkpt) {
+function extractSensors(trkpt) {
+  const out = { hr: null, cad: null, watts: null };
   const extensions = trkpt.querySelector('extensions');
-  if (!extensions) return null;
+  if (!extensions) return out;
 
-  // Strategy 1: querySelector with various namespace-prefixed element names.
-  // DOMParser retains the local name (after colon) so we can match by local name.
-  const allExtChildren = extensions.querySelectorAll('*');
-  for (const el of allExtChildren) {
-    const localName = el.localName.toLowerCase();
-    if (localName === 'hr' || localName === 'heartrate' || localName === 'heart_rate') {
-      const val = parseInt(el.textContent.trim(), 10);
-      if (!isNaN(val) && val > 0 && val < 300) return val;
+  for (const el of extensions.querySelectorAll('*')) {
+    const name = el.localName.toLowerCase();
+    const val = parseInt(el.textContent.trim(), 10);
+    if (isNaN(val)) continue;
+    if (out.hr === null && (name === 'hr' || name === 'heartrate' || name === 'heart_rate')) {
+      if (val > 0 && val < 300) out.hr = val;
+    } else if (out.cad === null && (name === 'cad' || name === 'cadence')) {
+      if (val > 0) out.cad = val;
+    } else if (out.watts === null && (name === 'power' || name === 'watts')) {
+      if (val > 0) out.watts = val;
     }
   }
-
-  return null;
+  return out;
 }
 
 /**
  * Compute total elevation gain from an array of GPX points.
- * Only counts upward transitions > 1m (noise filter).
+ *
+ * GPS/barometric elevation is noisy, so summing every positive step over-counts
+ * badly (a flat run can "climb" hundreds of metres). Two-stage filter instead:
+ * a 3-point median removes single-sample spikes, then a 2 m hysteresis band
+ * counts a climb only once it has risen 2 m above the last anchor.
+ *
  * @param {{ ele: number|null }[]} points
  * @returns {number} elevation gain in metres
  */
 export function computeElevationGain(points) {
+  const eles = points.map(p => p.ele).filter(e => e !== null && e !== undefined);
+  if (eles.length < 2) return 0;
+
+  const smooth = eles.map((e, i) => {
+    if (i === 0 || i === eles.length - 1) return e;
+    return [eles[i - 1], e, eles[i + 1]].sort((a, b) => a - b)[1];
+  });
+
+  const THRESHOLD_M = 2;
   let gain = 0;
-  for (let i = 1; i < points.length; i++) {
-    if (points[i].ele !== null && points[i - 1].ele !== null) {
-      const diff = points[i].ele - points[i - 1].ele;
-      if (diff > 1) gain += diff;
-    }
+  let anchor = smooth[0];
+  for (let i = 1; i < smooth.length; i++) {
+    const delta = smooth[i] - anchor;
+    if (delta > THRESHOLD_M) { gain += delta; anchor = smooth[i]; }
+    else if (delta < -THRESHOLD_M) anchor = smooth[i];
   }
   return gain;
 }

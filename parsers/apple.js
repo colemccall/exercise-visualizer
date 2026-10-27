@@ -1,23 +1,36 @@
 /**
  * parsers/apple.js
- * Parse an Apple Health export (ZIP or XML) into Activity[].
+ * Parse an Apple Health export (ZIP or XML) into Activity[] plus the daily
+ * Activity Ring summaries.
  *
  * Apple Health export structure:
  *   apple_health_export/
- *     export.xml                — main XML with <Workout> elements
+ *     export.xml                — main XML with <Workout> and <ActivitySummary>
  *     workout-routes/           — GPX files for each workout with GPS
  *       route_YYYY-MM-DD_*.gpx
  *
- * The export.xml can be very large (100MB+), so we use a chunked string
- * scanning approach with regex to extract <Workout> elements without
- * loading the full DOM.
+ * The export.xml can be very large (100MB–1GB+), so we stream it and use
+ * string scanning with regex to pull out <Workout> blocks and the
+ * self-closing <ActivitySummary/> tags without building a DOM or ever holding
+ * the whole decompressed text in one string.
  *
- * HKWorkoutActivityType values are mapped to display names.
+ * HKWorkoutActivityType values are mapped to display names; anything that
+ * isn't one of the five core types becomes type 'Other' with the original
+ * label preserved in `sub_type` ("Yoga", "Rowing", …).
+ *
+ * Note: an Apple export also contains workouts that other apps (including
+ * Strava) wrote into Health. Those arrive as source 'apple' with
+ * `device` = "Strava"; the cross-source dedup in core/dedup.js pairs them
+ * with the real Strava CSV row.
  */
 
-import { parseGPX, computeDistance, computeElevationGain } from './gpx.js';
+import { loadGpxEntry } from './gpx.js';
+import { createActivity, humanize } from './model.js';
 
 // ── Activity type mapping from HKWorkoutActivityType ─────────────────────────
+// Only the core types are listed; every other HKWorkoutActivityType (Yoga,
+// Rowing, Kickboxing, Golf, Pickleball, Climbing, Paddle sports, …) falls
+// through to 'Other' and is told apart by sub_type.
 const HK_TYPE_MAP = {
   'HKWorkoutActivityTypeRunning':          'Run',
   'HKWorkoutActivityTypeCycling':          'Ride',
@@ -25,26 +38,23 @@ const HK_TYPE_MAP = {
   'HKWorkoutActivityTypeHiking':           'Hike',
   'HKWorkoutActivityTypeSwimming':         'Swim',
   'HKWorkoutActivityTypeSwimmingOpenWater':'Swim',
-  'HKWorkoutActivityTypeCrossTraining':    'Other',
-  'HKWorkoutActivityTypeElliptical':       'Other',
-  'HKWorkoutActivityTypeStairClimbing':    'Other',
-  'HKWorkoutActivityTypeYoga':             'Other',
-  'HKWorkoutActivityTypeFunctionalStrengthTraining': 'Other',
-  'HKWorkoutActivityTypeTraditionalStrengthTraining': 'Other',
-  'HKWorkoutActivityTypeHighIntensityIntervalTraining': 'Other',
-  'HKWorkoutActivityTypeMixedCardio':      'Other',
-  'HKWorkoutActivityTypePilates':          'Other',
-  'HKWorkoutActivityTypeBarre':            'Other',
-  'HKWorkoutActivityTypeDance':            'Other',
-  'HKWorkoutActivityTypeSoccer':           'Other',
-  'HKWorkoutActivityTypeBasketball':       'Other',
-  'HKWorkoutActivityTypeTennis':           'Other',
-  'HKWorkoutActivityTypeSkatingSports':    'Other',
-  'HKWorkoutActivityTypeSnowSports':       'Other',
+};
+
+// Labels where "split the camel case" reads badly.
+const HK_LABEL_OVERRIDES = {
+  'HighIntensityIntervalTraining': 'HIIT',
+  'CoreTraining': 'Core Training',
 };
 
 function mapHKType(hkType) {
   return HK_TYPE_MAP[hkType] || 'Other';
+}
+
+/** "HKWorkoutActivityTypeFunctionalStrengthTraining" → "Functional Strength Training" */
+function hkSubType(hkType) {
+  const bare = String(hkType || '').replace(/^HKWorkoutActivityType/, '');
+  if (!bare) return null;
+  return HK_LABEL_OVERRIDES[bare] || humanize(bare);
 }
 
 // ── Unit conversions ──────────────────────────────────────────────────────────
@@ -58,62 +68,197 @@ function toMetres(value, unit) {
   return value; // assume metres
 }
 
-// ── Chunked XML extraction ────────────────────────────────────────────────────
+function toSeconds(value, unit) {
+  const u = (unit || 'min').toLowerCase();
+  if (u === 'hr' || u === 'h') return value * 3600;
+  if (u === 'sec' || u === 's') return value;
+  return value * 60; // 'min' (Apple's default) and anything unrecognised
+}
+
+function toKcal(value, unit) {
+  const u = (unit || 'kcal').toLowerCase();
+  if (u === 'kj') return value / 4.184;
+  if (u === 'j') return value / 4184;
+  return value; // 'Cal' and 'kcal' are both kilocalories in HealthKit
+}
+
+// ── Streaming extraction ──────────────────────────────────────────────────────
 /**
- * Stream <Workout> blocks out of a JSZip entry without ever building the
- * full decompressed string. Apple Health XMLs can exceed JS's string length
- * limit (~1 GB), so we use JSZip's internalStream to process uint8 chunks
- * one at a time through TextDecoder, keeping only a small carry-over buffer.
+ * Incremental scanner over decoded export.xml text. Feed it chunks with
+ * `push()`; it calls `onWorkout(xml)` for every complete <Workout> block and
+ * `onSummary(tag)` for every <ActivitySummary/> tag, keeping only a small
+ * carry-over string between chunks. The overwhelming majority of the file is
+ * <Record> noise that never matches and is dropped immediately.
  *
- * @param {object} zipEntry  JSZip file entry
- * @param {Function} onProgress  (bytesProcessed: number) => void
- * @returns {Promise<string[]>}  Raw XML strings for each <Workout> element
+ * @param {(xml: string) => void} onWorkout
+ * @param {(tag: string) => void} onSummary
  */
-function streamWorkoutStrings(zipEntry, onProgress) {
+function createScanner(onWorkout, onSummary) {
+  const WORKOUT_OPEN = '<Workout ';
+  const WORKOUT_CLOSE = '</Workout>';
+  const SUMMARY_OPEN = '<ActivitySummary ';
+  // Long enough to hold the longest opening marker split across two chunks.
+  const TAIL = SUMMARY_OPEN.length;
+  let carry = '';
+
+  return {
+    push(chunk) {
+      const text = carry + chunk;
+      carry = '';
+      let pos = 0;
+
+      while (true) {
+        const w = text.indexOf(WORKOUT_OPEN, pos);
+        const s = text.indexOf(SUMMARY_OPEN, pos);
+        if (w === -1 && s === -1) break;
+
+        if (s !== -1 && (w === -1 || s < w)) {
+          const end = text.indexOf('>', s);
+          if (end === -1) { carry = text.slice(s); return; }
+          onSummary(text.slice(s, end + 1));
+          pos = end + 1;
+          continue;
+        }
+
+        const tagEnd = text.indexOf('>', w);
+        if (tagEnd === -1) { carry = text.slice(w); return; }
+        if (text[tagEnd - 1] === '/') {
+          // Self-closing <Workout …/> (no children) — the tag is the block.
+          onWorkout(text.slice(w, tagEnd + 1));
+          pos = tagEnd + 1;
+          continue;
+        }
+        const end = text.indexOf(WORKOUT_CLOSE, tagEnd);
+        if (end === -1) {
+          // Workout block straddles a chunk boundary — carry it forward
+          carry = text.slice(w);
+          return;
+        }
+        onWorkout(text.slice(w, end + WORKOUT_CLOSE.length));
+        pos = end + WORKOUT_CLOSE.length;
+      }
+
+      // Keep a short tail so a marker split across chunks is still found.
+      carry = text.slice(Math.max(pos, text.length - TAIL));
+    },
+  };
+}
+
+/**
+ * Stream a JSZip entry through the scanner without building the full string.
+ * @returns {Promise<{workouts: string[], summaries: string[]}>}
+ */
+function streamZipEntry(zipEntry, onBytes) {
   return new Promise((resolve, reject) => {
     const decoder = new TextDecoder('utf-8');
     const workouts = [];
-    let overflow = ''; // tail from previous chunk that may contain a partial tag
+    const summaries = [];
+    const scanner = createScanner(w => workouts.push(w), s => summaries.push(s));
     let bytesProcessed = 0;
 
     zipEntry.internalStream('uint8array')
       .on('data', (chunk) => {
         bytesProcessed += chunk.length;
-        onProgress(bytesProcessed);
-
-        // Decode this chunk (stream:true tells TextDecoder more bytes are coming)
-        const text = overflow + decoder.decode(chunk, { stream: true });
-        overflow = '';
-
-        let searchFrom = 0;
-        while (true) {
-          const start = text.indexOf('<Workout ', searchFrom);
-          if (start === -1) break;
-
-          const end = text.indexOf('</Workout>', start);
-          if (end === -1) {
-            // Workout block straddles a chunk boundary — carry it forward
-            overflow = text.slice(start);
-            break;
-          }
-
-          workouts.push(text.slice(start, end + '</Workout>'.length));
-          searchFrom = end + '</Workout>'.length;
-        }
-
-        // Keep enough tail to catch a '<Workout' that starts near the chunk end
-        if (overflow === '' && searchFrom < text.length) {
-          const keepFrom = Math.max(searchFrom, text.length - 300);
-          overflow = text.slice(keepFrom);
-        }
+        onBytes(bytesProcessed, workouts.length);
+        // stream:true tells TextDecoder more bytes are coming (split UTF-8 chars)
+        scanner.push(decoder.decode(chunk, { stream: true }));
       })
       .on('error', reject)
-      .on('end', () => resolve(workouts))
+      .on('end', () => resolve({ workouts, summaries }))
       .resume();
   });
 }
 
+/**
+ * Same extraction for a bare export.xml. Uses the File's stream when there is
+ * one (browsers, Node Blob) so a huge XML is never read into a single string;
+ * otherwise falls back to slicing the text / bytes we were given.
+ */
+async function streamPlainXml(file, onBytes) {
+  const workouts = [];
+  const summaries = [];
+  const scanner = createScanner(w => workouts.push(w), s => summaries.push(s));
+  const decoder = new TextDecoder('utf-8');
+  let bytesProcessed = 0;
+
+  if (typeof file.stream === 'function') {
+    const reader = file.stream().getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytesProcessed += value.length;
+      onBytes(bytesProcessed, workouts.length);
+      scanner.push(decoder.decode(value, { stream: true }));
+    }
+  } else if (typeof file.text === 'function') {
+    scanner.push(await file.text());
+  } else {
+    // Buffer / Uint8Array
+    const SLICE = 4 * 1024 * 1024;
+    for (let i = 0; i < file.length; i += SLICE) {
+      const part = file.subarray(i, i + SLICE);
+      bytesProcessed += part.length;
+      onBytes(bytesProcessed, workouts.length);
+      scanner.push(decoder.decode(part, { stream: true }));
+    }
+  }
+  return { workouts, summaries };
+}
+
+// ── Parse a single <ActivitySummary/> tag ────────────────────────────────────
+/**
+ * One day of Activity Rings.
+ * @returns {{date:string, move_kcal:number, move_goal:number,
+ *            exercise_min:number, exercise_goal:number,
+ *            stand_hours:number, stand_goal:number}|null}
+ */
+function parseSummaryTag(tag) {
+  const attr = (name) => {
+    const m = tag.match(new RegExp(`\\b${name}="([^"]*)"`));
+    return m ? m[1] : null;
+  };
+  const num = (name) => {
+    const v = parseFloat(attr(name));
+    return isNaN(v) ? 0 : v;
+  };
+
+  const date = attr('dateComponents');
+  if (!date) return null;
+
+  const unit = attr('activeEnergyBurnedUnit');
+  const summary = {
+    date: date.slice(0, 10),
+    move_kcal: toKcal(num('activeEnergyBurned'), unit),
+    move_goal: toKcal(num('activeEnergyBurnedGoal'), unit),
+    exercise_min: num('appleExerciseTime'),
+    exercise_goal: num('appleExerciseTimeGoal'),
+    stand_hours: num('appleStandHours'),
+    stand_goal: num('appleStandHoursGoal'),
+  };
+
+  // Apple writes a zeroed row (with no goals) for days the ring wasn't set up.
+  const empty = !summary.move_kcal && !summary.move_goal && !summary.exercise_min &&
+                !summary.exercise_goal && !summary.stand_hours && !summary.stand_goal;
+  return empty ? null : summary;
+}
+
 // ── Parse a single <Workout> XML string ──────────────────────────────────────
+/** Attributes of a <WorkoutStatistics> child whose type starts with `typePrefix`. */
+function statsTag(workoutXml, typePrefix) {
+  const re = /<WorkoutStatistics\b[^>]*>/g;
+  let m;
+  while ((m = re.exec(workoutXml))) {
+    if (m[0].includes(`type="${typePrefix}`)) return m[0];
+  }
+  return null;
+}
+
+function tagAttr(tag, name) {
+  if (!tag) return null;
+  const m = tag.match(new RegExp(`\\b${name}="([^"]*)"`));
+  return m ? m[1] : null;
+}
+
 /**
  * Parse a raw <Workout> XML block into an Activity object.
  * Uses regex to extract attributes since we don't have the full DOM context.
@@ -123,41 +268,46 @@ function streamWorkoutStrings(zipEntry, onProgress) {
  * @returns {Activity|null}
  */
 function parseWorkoutXml(workoutXml, index) {
-  // Extract attributes from the opening tag
-  const attr = (name) => {
-    const match = workoutXml.match(new RegExp(`\\b${name}="([^"]*)"`));
-    return match ? match[1] : null;
-  };
+  // Attributes of the opening tag only — child elements reuse names like
+  // "duration" (WorkoutEvent) that must not leak into the workout's own.
+  const openTag = workoutXml.slice(0, workoutXml.indexOf('>') + 1);
+  const attr = (name) => tagAttr(openTag, name);
 
   const hkType   = attr('workoutActivityType');
   const startStr = attr('startDate');
-  const endStr   = attr('endDate');
-  const duration = parseFloat(attr('duration') || '0');
-  const durUnit  = attr('durationUnit') || 'min';
-
-  // Distance is in a child WorkoutStatistics element, not a direct attribute.
-  const distMatch = workoutXml.match(/WorkoutStatistics\b[^>]*type="HKQuantityTypeIdentifierDistance[^"]*"[^>]*sum="([^"]*)"[^>]*unit="([^"]*)"/);
-  const distVal  = distMatch ? parseFloat(distMatch[1]) : 0;
-  const distUnit = distMatch ? distMatch[2] : null;
-
   if (!startStr) return null;
 
   const date = new Date(startStr);
   if (isNaN(date.getTime())) return null;
 
-  // Duration: Apple stores in minutes by default
-  let duration_s = duration;
-  if (durUnit === 'min') duration_s = duration * 60;
-  else if (durUnit === 'hr') duration_s = duration * 3600;
+  const duration_s = toSeconds(parseFloat(attr('duration') || '0') || 0, attr('durationUnit'));
 
-  // Distance
+  // Distance is in a child WorkoutStatistics element (iOS 16+: the type is
+  // DistanceWalkingRunning / DistanceCycling / DistanceSwimming…), or in the
+  // older totalDistance attribute on the workout itself.
+  const distTag = statsTag(workoutXml, 'HKQuantityTypeIdentifierDistance');
+  let distVal = parseFloat(tagAttr(distTag, 'sum'));
+  let distUnit = tagAttr(distTag, 'unit');
+  if (isNaN(distVal)) {
+    distVal = parseFloat(attr('totalDistance'));
+    distUnit = attr('totalDistanceUnit');
+  }
   const distance_m = isNaN(distVal) ? 0 : toMetres(distVal, distUnit);
 
-  // Heart rate — look for WorkoutStatistics with type Average/Max HR
-  const avgHRMatch = workoutXml.match(/HKQuantityTypeIdentifierHeartRate"[^>]*average="([^"]*)"/);
-  const maxHRMatch = workoutXml.match(/HKQuantityTypeIdentifierHeartRate"[^>]*maximum="([^"]*)"/);
-  const avg_heart_rate = avgHRMatch ? Math.round(parseFloat(avgHRMatch[1])) : null;
-  const max_heart_rate = maxHRMatch ? Math.round(parseFloat(maxHRMatch[1])) : null;
+  // Heart rate — WorkoutStatistics with average/maximum
+  const hrTag = statsTag(workoutXml, 'HKQuantityTypeIdentifierHeartRate');
+  const avgHR = Math.round(parseFloat(tagAttr(hrTag, 'average')));
+  const maxHR = Math.round(parseFloat(tagAttr(hrTag, 'maximum')));
+
+  // Energy: active kcal from statistics, else the legacy totalEnergyBurned attribute.
+  const energyTag = statsTag(workoutXml, 'HKQuantityTypeIdentifierActiveEnergyBurned');
+  let kcal = parseFloat(tagAttr(energyTag, 'sum'));
+  let kcalUnit = tagAttr(energyTag, 'unit');
+  if (isNaN(kcal)) {
+    kcal = parseFloat(attr('totalEnergyBurned'));
+    kcalUnit = attr('totalEnergyBurnedUnit');
+  }
+  const calories_kcal = isNaN(kcal) || kcal <= 0 ? null : Math.round(toKcal(kcal, kcalUnit));
 
   // Elevation gain — stored as MetadataEntry with key "HKElevationAscended",
   // value format is "<number> <unit>" e.g. "11351 cm" or "113.51 m".
@@ -172,49 +322,62 @@ function parseWorkoutXml(workoutXml, index) {
     }
   }
 
+  // Indoor flag — MetadataEntry key="HKIndoorWorkout" value="0"|"1"
+  const indoorMatch = workoutXml.match(/key="HKIndoorWorkout"\s+value="([^"]*)"/);
+  const indoor = indoorMatch ? indoorMatch[1] === '1' : null;
+
   // Route file reference — inside <WorkoutRoute> as <FileReference path="..."/>
   const routeFileMatch = workoutXml.match(/<FileReference\b[^>]*path="([^"]*)"/);
   const gpx_file = routeFileMatch ? routeFileMatch[1] : null;
 
   const type = mapHKType(hkType || '');
-  const name = `${type} — ${date.toLocaleDateString()}`;
+  const sub_type = hkSubType(hkType) || type;
+  const name = `${type === 'Other' ? sub_type : type} — ${date.toLocaleDateString()}`;
 
-  return {
+  return createActivity({
     id: `apple-${date.getTime()}-${index}`,
     source: 'apple',
     name,
     type,
+    sub_type,
     date,
     distance_m,
     duration_s: Math.round(duration_s),
+    moving_s: Math.round(duration_s),
     elevation_gain_m: elevation_gain_m && !isNaN(elevation_gain_m) ? elevation_gain_m : null,
-    avg_heart_rate: avg_heart_rate && !isNaN(avg_heart_rate) ? avg_heart_rate : null,
-    max_heart_rate: max_heart_rate && !isNaN(max_heart_rate) ? max_heart_rate : null,
+    avg_heart_rate: avgHR > 0 ? avgHR : null,
+    max_heart_rate: maxHR > 0 ? maxHR : null,
+    calories_kcal,
+    indoor,
+    device: attr('sourceName'),
     has_route: !!gpx_file,
     gpx_file,
-    route_points: null,
-    has_duplicate: false,
     _rawGpxPath: gpx_file, // kept for zip resolution
-  };
+  });
 }
 
 // ── Main parse function ───────────────────────────────────────────────────────
 /**
- * Parse an Apple Health export into Activity[].
+ * Parse an Apple Health export into activities + daily ring summaries.
  * @param {File} file   A .zip or .xml File object
  * @param {Function} onProgress  (pct: number, label: string) => void
- * @returns {Promise<Activity[]>}
+ * @returns {Promise<{activities: Activity[], summaries: object[]}>}
+ *   summaries: [{ date:'YYYY-MM-DD', move_kcal, move_goal, exercise_min,
+ *                 exercise_goal, stand_hours, stand_goal }] sorted ascending
  */
-export async function parse(file, onProgress = () => {}) {
+export async function parseAppleExport(file, onProgress = () => {}) {
   const activities = [];
+  let summaries = [];
 
   onProgress(5, 'Reading Apple Health export…');
 
   const lowerName = file.name.toLowerCase();
+  let zip = null;
+  let extracted = null;
 
   // ── Case 1: ZIP archive ───────────────────────────────────────────────────
   if (lowerName.endsWith('.zip')) {
-    const zip = await JSZip.loadAsync(file);
+    zip = await JSZip.loadAsync(file);
 
     // Find the main export.xml — exclude the CDA variant which has no Workout elements
     const xmlEntry = Object.values(zip.files).find(f =>
@@ -226,79 +389,99 @@ export async function parse(file, onProgress = () => {}) {
     if (!xmlEntry) {
       console.warn('Apple Health ZIP: no export.xml found');
       onProgress(100, 'No export.xml found in ZIP');
-      return activities;
+      return { activities, summaries };
     }
 
     onProgress(15, 'Streaming export.xml…');
     const totalSize = xmlEntry._data?.uncompressedSize || 0;
-    let streamedWorkouts = 0;
-    const workoutStrings = await streamWorkoutStrings(xmlEntry, (bytes) => {
+    extracted = await streamZipEntry(xmlEntry, (bytes, found) => {
       const pct = totalSize ? Math.min(55, Math.round((bytes / totalSize) * 55)) : 0;
-      onProgress(15 + pct, `Scanning XML… ${streamedWorkouts} workouts found`);
+      onProgress(15 + pct, `Scanning XML… ${found} workouts found`);
     });
-    streamedWorkouts = workoutStrings.length;
-
-    onProgress(72, `Found ${workoutStrings.length} workouts, parsing…`);
-
-    for (let i = 0; i < workoutStrings.length; i++) {
-      const activity = parseWorkoutXml(workoutStrings[i], i);
-      if (!activity) continue;
-
-      // Attempt to attach a GPX loader if a route file path was found
-      if (activity._rawGpxPath) {
-        const gpxEntry = findGpxEntry(zip, activity._rawGpxPath);
-        if (gpxEntry) {
-          activity.has_route = true;
-          activity.gpx_file = gpxEntry.name;
-          activity._gpxLoader = async () => {
-            const text = await gpxEntry.async('string');
-            return parseGPX(text);
-          };
-        }
-      }
-
-      // NOTE: there is deliberately no "match a route by date" fallback here.
-      // Route filenames are stamped with the workout's *creation* date in local
-      // time, so matching them against a workout's UTC calendar day picks the
-      // wrong file — and it only ever fires for workouts that genuinely have no
-      // route (yoga, strength training, indoor cardio), handing them some other
-      // workout's GPS trace. Across all three real exports every route in the
-      // ZIP was already resolved by FileReference above (330/330, 332/332,
-      // 435/435), so the fallback contributed nothing but false positives.
-
-      activities.push(activity);
-
-      if (i % 100 === 0) {
-        onProgress(72 + Math.round((i / workoutStrings.length) * 25), `Parsed ${i} / ${workoutStrings.length} workouts…`);
-      }
-    }
   }
 
   // ── Case 2: Plain XML file ────────────────────────────────────────────────
   else if (lowerName.endsWith('.xml')) {
-    onProgress(20, 'Reading XML…');
-    const xmlText = await file.text();
+    onProgress(15, 'Streaming XML…');
+    const totalSize = file.size || file.length || 0;
+    extracted = await streamPlainXml(file, (bytes, found) => {
+      const pct = totalSize ? Math.min(55, Math.round((bytes / totalSize) * 55)) : 0;
+      onProgress(15 + pct, `Scanning XML… ${found} workouts found`);
+    });
+  }
 
-    onProgress(35, 'Scanning for workouts…');
-    const workoutStrings = extractWorkoutStrings(xmlText);
+  if (!extracted) {
+    onProgress(100, 'Unsupported Apple Health file');
+    return { activities, summaries };
+  }
 
-    for (let i = 0; i < workoutStrings.length; i++) {
-      const activity = parseWorkoutXml(workoutStrings[i], i);
-      if (activity) activities.push(activity);
+  const { workouts: workoutStrings, summaries: summaryTags } = extracted;
+  onProgress(72, `Found ${workoutStrings.length} workouts, parsing…`);
+
+  // Route lookup: one pass over the ZIP, then O(1) per workout. Apple's
+  // FileReference path is absolute-ish ("/workout-routes/route_….gpx"), so we
+  // match on the basename.
+  let routesByBase = null;
+  if (zip) {
+    routesByBase = new Map();
+    for (const f of Object.values(zip.files)) {
+      if (!f.dir) routesByBase.set(f.name.split('/').pop().toLowerCase(), f);
     }
   }
 
+  for (let i = 0; i < workoutStrings.length; i++) {
+    const activity = parseWorkoutXml(workoutStrings[i], i);
+    if (!activity) continue;
+
+    if (routesByBase && activity._rawGpxPath) {
+      const gpxEntry = routesByBase.get(activity._rawGpxPath.split('/').pop().toLowerCase());
+      if (gpxEntry) {
+        activity.has_route = true;
+        activity.gpx_file = gpxEntry.name;
+        activity._gpxLoader = () => loadGpxEntry(gpxEntry);
+      } else {
+        // Referenced route isn't in the archive — don't advertise one.
+        activity.has_route = false;
+        activity.gpx_file = null;
+      }
+    }
+    // Bare export.xml: no GPX files alongside it, so routes can't resolve.
+    else if (!zip) {
+      activity.has_route = false;
+      activity.gpx_file = null;
+    }
+
+    // NOTE: there is deliberately no "match a route by date" fallback here.
+    // Route filenames are stamped with the workout's *creation* date in local
+    // time, so matching them against a workout's UTC calendar day picks the
+    // wrong file — and it only ever fires for workouts that genuinely have no
+    // route (yoga, strength training, indoor cardio), handing them some other
+    // workout's GPS trace. Across all three real exports every route in the
+    // ZIP was already resolved by FileReference above (330/330, 332/332,
+    // 435/435), so the fallback contributed nothing but false positives.
+
+    activities.push(activity);
+
+    if (i % 100 === 0) {
+      onProgress(72 + Math.round((i / workoutStrings.length) * 25), `Parsed ${i} / ${workoutStrings.length} workouts…`);
+    }
+  }
+
+  summaries = summaryTags.map(parseSummaryTag).filter(Boolean);
+  summaries.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
   onProgress(100, `Loaded ${activities.length} Apple Health activities`);
-  return activities;
+  return { activities, summaries };
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function findGpxEntry(zip, rawPath) {
-  // rawPath from Apple may be an absolute path like
-  // "/var/mobile/.../workout-routes/route_2023-01-01_12.00.00.gpx"
-  // We match on the basename.
-  const basename = rawPath.split('/').pop().toLowerCase();
-  return Object.values(zip.files).find(f =>
-    !f.dir && f.name.toLowerCase().endsWith(basename)
-  ) || null;
+/**
+ * Activities only — the original entry point, kept for existing callers.
+ * @param {File} file
+ * @param {Function} onProgress
+ * @returns {Promise<Activity[]>}
+ */
+export async function parseApple(file, onProgress = () => {}) {
+  return (await parseAppleExport(file, onProgress)).activities;
 }
+
+export { parseApple as parse };

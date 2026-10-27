@@ -51,29 +51,6 @@ function computeTransitSec(routeKm, animSpeed) {
   return (routeKm * SEC_PER_KM_AT_1X) / Math.max(0.1, animSpeed);
 }
 
-// Kept internal — the modal used to display "≈ Ns" but the estimate
-// couldn't guarantee accuracy once we moved to frame-count-based rendering,
-// so it was removed from the UI. Still handy for debugging.
-// eslint-disable-next-line no-unused-vars
-function estimateExportDuration(activity, { animSpeed = 1, photoPauseSec = 3, videoPlaySec = 8, intro = true, introSec = 3 } = {}) {
-  try {
-    const route = (activity.route_points || []).filter(p => p.lat !== null && p.lng !== null);
-    const routeKm = totalRouteKm(route);
-    const photos = (activity.photos || []);
-    const photoCount = photos.filter(p => !p.isVideo).length;
-    const videoCount = photos.filter(p => p.isVideo).length;
-
-    const transitSec = computeTransitSec(routeKm, animSpeed);
-    const photoTotal = photoCount * photoPauseSec;
-    const videoTotal = videoCount * videoPlaySec;
-    const introTotal = intro ? introSec : 0;
-
-    return Math.round(transitSec + photoTotal + videoTotal + introTotal);
-  } catch (err) {
-    console.warn('[export] estimate failed', err);
-    return 0;
-  }
-}
 
 /**
  * @param {object} args
@@ -326,7 +303,7 @@ export async function exportTourVideo({ activity, opts = {} }) {
     throw new Error('This browser does not support WebCodecs (needed for consistent video export). Please try Chrome, Edge, or Safari 16.4+.');
   }
 
-  const { Muxer, ArrayBufferTarget } = await import(/* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/webm-muxer@5.0.3/build/webm-muxer.mjs');
+  const { Muxer, ArrayBufferTarget } = await import(/* @vite-ignore */ new URL('../vendor/webm-muxer.mjs', import.meta.url).href);
   const muxer = new Muxer({
     target: new ArrayBufferTarget(),
     video: { codec: 'V_VP9', width: size.w, height: size.h, frameRate: FPS },
@@ -636,9 +613,6 @@ function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-function easeOutCubic(t) {
-  return 1 - Math.pow(1 - t, 3);
-}
 
 function formatDuration(seconds) {
   const h = Math.floor(seconds / 3600);

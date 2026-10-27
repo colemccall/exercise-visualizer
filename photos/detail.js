@@ -5,6 +5,7 @@
  * and a Play/Prev/Next tour that flies the map between them.
  */
 
+import { escapeHtml } from '../core/util.js';
 import { renderRoute } from '../map/route.js';
 import { ensurePhotoURL } from './heic.js';
 import { ensureVideoPoster } from './video.js';
@@ -162,7 +163,9 @@ export async function renderPhotosDetail(container, activity, opts) {
   }
 
   const mapEl = container.querySelector('#pd-map');
-  const map = renderRoute(activity, mapEl);
+  // SVG, not canvas: the tour styles its dot and polyline by CSS class.
+  const routeCtl = renderRoute(activity, mapEl, { canvas: false });
+  const map = routeCtl ? routeCtl.map : null;
   _mapRef = map;
 
   // Build the entries once — each carries its playable URL, poster URL, and
@@ -909,11 +912,6 @@ function formatDate(d) {
 }
 function formatTime(d) {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-}
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[c]));
 }
 function cssEscape(s) {
   return String(s).replace(/'/g, "\\'");

@@ -4,6 +4,8 @@
  * Shows 52 weeks × 7 days, intensity = activity count per day.
  */
 
+import { addTooltip } from './tooltip.js';
+import { escapeHtml } from '../core/util.js';
 import { TYPE_COLORS } from '../design-system/activity-colors.js';
 
 export function renderWeeklyChart(activities, container, units = 'imperial') {
@@ -65,11 +67,16 @@ export function renderWeeklyChart(activities, container, units = 'imperial') {
       .attr('fill', 'var(--text-muted)').style('font-size', '8px').text(lbl);
   });
 
+  // Only draw as many trailing weeks as fit; the rest used to overflow the container.
+  const skipWeeks = Math.max(0, WEEKS - cols);
+  const weekIdx = d => Math.floor((d.date - startDay) / (7 * 86400000));
+  const vdays = days.filter(d => weekIdx(d) >= skipWeeks);
+
   const g = svg.append('g').attr('transform', `translate(${LABEL_W}, ${LABEL_H})`);
 
   // Month labels
   let lastMonth = -1;
-  days.filter((d, i) => i % 7 === 0).forEach((d, wi) => {
+  vdays.filter((d, i) => i % 7 === 0).forEach((d, wi) => {
     if (d.date.getMonth() !== lastMonth) {
       lastMonth = d.date.getMonth();
       g.append('text')
@@ -106,7 +113,7 @@ export function renderWeeklyChart(activities, container, units = 'imperial') {
     .on('mousemove', (event, d) => {
       if (d.count === 0) return;
       const dateStr = d.date.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' });
-      const types   = [...new Set(d.types)].join(', ');
+      const types   = escapeHtml([...new Set(d.types)].join(', '));
       const dist    = d.dist > 0
         ? `<br>${isImperial ? `${(d.dist / 1609.344).toFixed(1)} mi` : `${(d.dist / 1000).toFixed(1)} km`}`
         : '';
@@ -132,17 +139,3 @@ function colorWithOpacity(hex, opacity) {
   return `rgba(${r},${g},${b},${opacity.toFixed(2)})`;
 }
 
-function addTooltip(container) {
-  const el = document.createElement('div');
-  el.style.cssText = 'position:fixed;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--text);pointer-events:none;z-index:9000;display:none;box-shadow:0 2px 8px rgba(0,0,0,0.15);line-height:1.6;';
-  document.body.appendChild(el);
-  return {
-    show(event, html) {
-      el.innerHTML = html;
-      el.style.display = 'block';
-      el.style.left = (event.clientX + 12) + 'px';
-      el.style.top  = (event.clientY - 10) + 'px';
-    },
-    hide() { el.style.display = 'none'; },
-  };
-}

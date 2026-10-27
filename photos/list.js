@@ -5,6 +5,7 @@
  * re-runs matching when changed.
  */
 
+import { escapeHtml } from '../core/util.js';
 import { ensurePhotoURL } from './heic.js';
 import { ensureVideoPoster } from './video.js';
 
@@ -104,8 +105,3 @@ function formatDate(d) {
   return d.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[c]));
-}

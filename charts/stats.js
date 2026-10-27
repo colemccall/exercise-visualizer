@@ -11,6 +11,8 @@
  * guessing.
  */
 
+import { escapeHtml } from '../core/util.js';
+
 const DAY_MS = 86400000;
 const EVEREST_M = 8848.86;      // sea level to summit
 const EARTH_CIRCUM_M = 40075000; // equatorial
@@ -260,13 +262,6 @@ function formatHour(h) {
   return h < 12 ? `${h} AM` : `${h - 12} PM`;
 }
 
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 /**
  * Full stats panel — grouped tiles plus the per-type breakdown table.

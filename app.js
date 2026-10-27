@@ -1,1833 +1,426 @@
 /**
  * app.js
- * Fitness Activity Visualizer — main application entry point.
+ * Fitness Visualizer — entry point and orchestrator.
  *
- * Responsibilities:
- *   - Upload handling (drag-and-drop + click-to-browse for 3 sources)
- *   - Orchestrate parsers (strava, apple)
- *   - Merge activity lists, run deduplication
- *   - Manage filter state (type, date range)
- *   - Unit toggle (metric / imperial), stored in localStorage
- *   - Render activity list, stats bar, charts, heatmap
- *   - Activity detail modal (lazy GPX load, route map, charts)
+ * This file owns only the shell: the nav, the three experience modes, the theme
+ * and unit toggles, routing between views, and the upload dialog. Each view
+ * lives in views/*.js and renders from the shared store in core/state.js; data
+ * parsing lives in parsers/*.js and core/upload.js.
  *
- * External globals assumed present (CDN):
- *   L        (Leaflet)
- *   JSZip    (jszip)
- *   d3       (D3 v7, loaded as ESM re-export below)
+ * External globals (vendored under /vendor, loaded by classic <script> tags):
+ *   L (Leaflet), JSZip, d3
  */
 
-// ── D3 ESM import — makes `d3` available as a global for chart modules ────────
-import * as _d3 from 'https://cdn.jsdelivr.net/npm/d3@7/+esm';
-window.d3 = _d3;
-
-// ── Parser imports ────────────────────────────────────────────────────────────
-import { parse as parseStrava }  from './parsers/strava.js';
-import { parse as parseApple }   from './parsers/apple.js';
-import { parse as parsePhotos } from './parsers/photos.js';
-import { matchPhotosToActivities } from './photos/matcher.js';
+import { state, on, emit, scoped, mergedCount } from './core/state.js';
+import {
+  MODES, MODE_IDS, getMode, setMode, restoreMode, modeAvailable, viewAllowed,
+} from './core/modes.js';
+import { startRouter, navigate, hrefFor, parseHash } from './core/router.js';
+import { safeStorage } from './core/util.js';
+import { getUnits, setUnits } from './core/format.js';
+import {
+  syncNavHeight, showToast, openModal, anyModalOpen,
+} from './core/ui.js';
+import { initCollapsibles } from './core/collapse.js';
+import {
+  setupUploadZones, parseStaged, restoreSaved, saveRoutesInBackground, deleteAllData,
+  rematchPhotos, rebuildMerge,
+} from './core/upload.js';
+import { icon, BRAND_MARK } from './components/icons.js';
+import { setHeatmapTheme } from './map/heatmap.js';
 import { renderPhotosList } from './photos/list.js';
 import { renderPhotosDetail } from './photos/detail.js';
 
-// ── Chart imports ─────────────────────────────────────────────────────────────
-import { renderDistanceChart }  from './charts/distance.js';
-import { renderWeeklyChart }    from './charts/weekly.js';
-import { renderHRZones }        from './charts/hr-zones.js';
-import { renderRecords }        from './charts/records.js';
-import { renderStats } from './charts/stats.js';
-import { renderElevationChart, renderHRLineChart } from './charts/elevation.js';
-
-// ── Map imports ───────────────────────────────────────────────────────────────
-import { initHeatmap, renderHeatmap, setHeatmapTheme, routeStyle, styleColor, setHeatStyle, getHeatStyle, getFrequencyRamp, getFrequencyRange, raiseHotRoutes, setRouteHandlers, highlightRoute, clearHighlight, zoomToRoute, _renderedPolylines, _renderedActivities, TYPE_COLORS } from './map/heatmap.js';
-import { renderRoute }                from './map/route.js';
+import { renderToday } from './views/today.js';
+import { renderFeed, resetFeedPaging } from './views/feed.js';
+import { renderActivity, destroyActivity, setActivityHandlers } from './views/activity.js';
+import { renderAwards } from './views/awards.js';
+import { renderProfile } from './views/profile.js';
+import { renderStatsView, initStatsView, redrawCharts } from './views/stats-view.js';
+import {
+  renderMapView, initMapView, invalidateMap, resetMapDrawing, clearRouteSelection,
+  hasRouteSelection, isMapFullscreen, setMapFullscreen, toggleMapFullscreen, restyleMapForTheme, tlStop,
+} from './views/map-view.js';
 
 // ═════════════════════════════════════════════════════════════════════════════
-// STATE
+// VIEW REGISTRY + ROUTING
 // ═════════════════════════════════════════════════════════════════════════════
 
-/** @type {Activity[]} All loaded activities (across all sources) */
-let allActivities = [];
+const VIEW_ICON = { today: 'today', feed: 'feed', map: 'map', awards: 'awards', charts: 'charts', profile: 'profile', photos: 'photos' };
+const KNOWN_VIEWS = new Set(['today', 'feed', 'activity', 'map', 'awards', 'profile', 'charts', 'photos']);
 
-/** @type {object[]} All parsed photo objects (from parsers/photos.js) */
-let allPhotos = [];
-
-/** Photo-to-workout match window, in minutes */
-let photoBufferMinutes = 5;
-
-/** Latest match summary from matchPhotosToActivities */
-let photoMatchSummary = { matched: 0, unmatched: 0, activitiesWithPhotos: [] };
-
-/** @type {'metric'|'imperial'}
- *  Miles are the default. A stored value only wins if the user actually
- *  picked it: an older build wrote 'metric' into this key on load, so a
- *  stored value without the explicit-choice flag is ignored. */
-let units = localStorage.getItem('fitness-units-explicit') === '1'
-  ? (localStorage.getItem('fitness-units') || 'imperial')
-  : 'imperial';
-
-/** Current filter state */
-const filters = {
-  type: 'All',
-  from: null,
-  to: null,
-  search: '',
-  duplicatesOnly: false,
-  month: null, // 'YYYY-M' from explore panel
+const renderers = {
+  today: () => renderToday({ openUpload }),
+  feed: renderFeed,
+  map: renderMapView,
+  awards: renderAwards,
+  profile: renderProfile,
+  charts: renderStatsView,
+  photos: renderPhotosView,
 };
 
-/** Leaflet heatmap instance */
-let heatmapInstance = null;
+let currentView = null;
+let currentParam = null;
+const dirty = new Set(Object.keys(renderers));
 
-/** Currently open detail activity */
-let detailRouteMap = null;
-
-// ═════════════════════════════════════════════════════════════════════════════
-// UPLOAD HANDLING — stage files per source, parse all on "Go"
-// ═════════════════════════════════════════════════════════════════════════════
-
-const SOURCES = ['strava', 'apple'];
-const PARSERS = { strava: parseStrava, apple: parseApple };
-
-// Photo "sources" are handled separately from fitness sources so they don't
-// pollute activity dedup logic.
-const PHOTO_SOURCES = ['photos'];
-
-/** Staged (not yet parsed) files per source */
-const stagedFiles = { strava: [], apple: [], photos: [] };
-
-function setupUploadZone(source) {
-  const zone  = document.getElementById(`zone-${source}`);
-  const input = document.getElementById(`file-${source}`);
-
-  // Don't use programmatic input.click() — iOS Safari blocks it.
-  // The <label for="file-{source}"> in the HTML handles file picker activation natively.
-
-  input.addEventListener('change', () => {
-    if (input.files.length > 0) stageFiles(source, Array.from(input.files));
-  });
-
-  zone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    zone.classList.add('drag-over');
-  });
-  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-  zone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    zone.classList.remove('drag-over');
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length > 0) stageFiles(source, files);
-  });
-}
-
-function stageFiles(source, files) {
-  stagedFiles[source] = files;
-  updateZoneUI(source);
-  updateGoButton();
-}
-
-function updateZoneUI(source) {
-  const files = stagedFiles[source];
-  const zone  = document.getElementById(`zone-${source}`);
-  const sub   = document.getElementById(`sub-${source}`);
-  const fileList = document.getElementById(`filelist-${source}`);
-
-  if (files.length > 0) {
-    zone.classList.add('staged');
-    zone.classList.remove('loaded');
-    sub.textContent = files.length === 1 ? files[0].name : `${files.length} files selected`;
-    if (fileList) {
-      fileList.innerHTML = files.map(f =>
-        `<div class="staged-file">&#128196; ${escapeHtml(f.name)}</div>`
-      ).join('');
-    }
-  } else {
-    zone.classList.remove('staged', 'loaded');
-    const defaults = {
-      strava: 'Choose ZIP file',
-      photos: 'Choose files',
-    };
-    sub.textContent = defaults[source] || 'Choose file';
-    if (fileList) fileList.innerHTML = '';
-  }
-}
-
-function updateGoButton() {
-  const all = SOURCES.concat(PHOTO_SOURCES);
-  const total = all.reduce((n, s) => n + stagedFiles[s].length, 0);
-  const btn   = document.getElementById('btn-go');
-  const count = document.getElementById('go-file-count');
-  if (!btn) return;
-
-  if (total > 0) {
-    btn.disabled = false;
-    btn.classList.add('ready');
-    const srcNames = all.filter(s => stagedFiles[s].length > 0)
-      .map(s => `${stagedFiles[s].length} ${s}`).join(', ');
-    if (count) count.textContent = srcNames;
-  } else {
-    btn.disabled = true;
-    btn.classList.remove('ready');
-    if (count) count.textContent = '';
-  }
-}
-
-async function parseAllStaged() {
-  const btn = document.getElementById('btn-go');
-  if (btn) btn.disabled = true;
-
-  const sourcesToParse = SOURCES.filter(s => stagedFiles[s].length > 0);
-  if (sourcesToParse.length === 0) return;
-
-  showProgress(0, 'Starting…');
-
-  let totalNew = 0;
-  const errors = [];
-
-  for (let si = 0; si < sourcesToParse.length; si++) {
-    const source = sourcesToParse[si];
-    const files  = stagedFiles[source];
-    const parser = PARSERS[source];
-    const baseProgress = Math.round((si / sourcesToParse.length) * 90);
-    const sliceSize    = Math.round(90 / sourcesToParse.length);
-
-    let newActivities = [];
-
-    try {
-      for (let fi = 0; fi < files.length; fi++) {
-        const partial = await parser(files[fi], (p, label) => {
-          showProgress(baseProgress + Math.round((p / 100) * sliceSize), label);
-        });
-        newActivities = newActivities.concat(partial);
-      }
-    } catch (err) {
-      console.error(`Error parsing ${source}:`, err);
-      errors.push(`${source}: ${err.message}`);
-      continue;
-    }
-
-    allActivities = allActivities.filter(a => a.source !== source);
-    allActivities = allActivities.concat(newActivities);
-    totalNew += newActivities.length;
-
-    // Mark zone as loaded
-    document.getElementById(`zone-${source}`)?.classList.replace('staged', 'loaded');
-    document.getElementById(`sub-${source}`).textContent = `${newActivities.length} loaded`;
-  }
-
-  showProgress(93, 'Checking for duplicates…');
-  flagDuplicates(allActivities);
-
-  // ── Photos & videos (optional) ─────────────────────────────────────────────
-  const photoFiles = stagedFiles.photos || [];
-
-  if (photoFiles.length > 0) {
-    try {
-      showProgress(94, `Reading ${photoFiles.length} files…`);
-      const newPhotos = await parsePhotos(photoFiles, (pct, label) => {
-        showProgress(94 + Math.round(pct / 100 * 5), label);
-      });
-      document.getElementById('zone-photos')?.classList.replace('staged', 'loaded');
-      const sub = document.getElementById('sub-photos');
-      if (sub) sub.textContent = `${newPhotos.length} loaded`;
-
-      allPhotos = allPhotos.concat(newPhotos);
-
-      showProgress(99, 'Matching photos to workouts…');
-      photoMatchSummary = await matchPhotosToActivities(allPhotos, allActivities, {
-        bufferMinutes: photoBufferMinutes,
-      });
-    } catch (err) {
-      console.error('Photo parse failed:', err);
-      errors.push(`photos: ${err.message}`);
-    }
-  } else if (allPhotos.length > 0) {
-    // Re-run matching in case activities changed
-    photoMatchSummary = await matchPhotosToActivities(allPhotos, allActivities, {
-      bufferMinutes: photoBufferMinutes,
-    });
-  }
-
-  showProgress(100, 'Done!');
-  setTimeout(hideProgress, 600);
-
-  const msgs = [`Loaded ${totalNew.toLocaleString()} activities`];
-  if (allPhotos.length > 0) msgs.push(`${photoMatchSummary.matched} photos matched`);
-  if (errors.length) showToast(`Errors: ${errors.join('; ')}`);
-  else showToast(msgs.join(' · '));
-
-  showDashboard();
-  updatePhotosNav();
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// DEDUPLICATION
-// ═════════════════════════════════════════════════════════════════════════════
-
-/**
- * Flag activities where:
- *   - date within 5 minutes of another activity from a different source
- *   - distance within 5% of that other activity
- *
- * Sets has_duplicate: true on both activities. Does not delete either.
- *
- * @param {Activity[]} activities  Modified in-place
- */
-function flagDuplicates(activities) {
-  // Allow up to 10 minutes time difference — clocks & GPS sync vary between devices
-  const MS_10_MIN = 10 * 60 * 1000;
-
-  for (const a of activities) {
-    a.has_duplicate = false;
-    a.duplicate_of  = null;
-  }
-
-  for (let i = 0; i < activities.length; i++) {
-    for (let j = i + 1; j < activities.length; j++) {
-      const a = activities[i];
-      const b = activities[j];
-
-      if (a.source === b.source) continue;
-      if (!a.date || !b.date) continue;
-      if (a.type !== b.type) continue; // different activity types can't be the same workout
-
-      const timeDiff = Math.abs(a.date - b.date);
-      if (timeDiff > MS_10_MIN) continue;
-
-      // Primary: distance match within 10%
-      const distA = a.distance_m;
-      const distB = b.distance_m;
-      let isDupe = false;
-
-      if (distA > 100 && distB > 100) {
-        // Both have meaningful distance — compare it
-        const larger    = Math.max(distA, distB);
-        const smaller   = Math.min(distA, distB);
-        const distRatio = (larger - smaller) / larger;
-        if (distRatio <= 0.10) isDupe = true;
-      } else if (distA < 100 && distB < 100) {
-        // Neither has distance (e.g. strength training) — match by duration within 10%
-        if (a.duration_s > 60 && b.duration_s > 60) {
-          const durLarger  = Math.max(a.duration_s, b.duration_s);
-          const durSmaller = Math.min(a.duration_s, b.duration_s);
-          if ((durLarger - durSmaller) / durLarger <= 0.10) isDupe = true;
-        }
-      }
-      // If one has distance and the other doesn't, we can't reliably match — skip
-
-      if (isDupe) {
-        a.has_duplicate = true;
-        b.has_duplicate = true;
-        if (!a.duplicate_of) a.duplicate_of = b.id;
-        if (!b.duplicate_of) b.duplicate_of = a.id;
-      }
-    }
-  }
-}
-
-function getDuplicateCount() {
-  // Count unique pairs, not individual flagged activities
-  const seen = new Set();
-  let pairs = 0;
-  for (const a of allActivities) {
-    if (a.has_duplicate && a.duplicate_of && !seen.has(a.id) && !seen.has(a.duplicate_of)) {
-      seen.add(a.id);
-      seen.add(a.duplicate_of);
-      pairs++;
-    }
-  }
-  return pairs;
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// FILTERING
-// ═════════════════════════════════════════════════════════════════════════════
-
-/**
- * Apply current filters to allActivities.
- * @returns {Activity[]}  Filtered subset, sorted newest first
- */
-function getFilteredActivities() {
-  const term = filters.search.toLowerCase().trim();
-  return allActivities
-    .filter(a => {
-      if (filters.type !== 'All' && a.type !== filters.type) return false;
-      if (filters.from && a.date < filters.from) return false;
-      if (filters.to) {
-        const toEnd = new Date(filters.to);
-        toEnd.setHours(23, 59, 59, 999);
-        if (a.date > toEnd) return false;
-      }
-      if (term && !a.name.toLowerCase().includes(term) && !a.type.toLowerCase().includes(term)) return false;
-      if (filters.duplicatesOnly && !a.has_duplicate) return false;
-      if (filters.month) {
-        const [fy, fm] = filters.month.split('-');
-        if (a.date.getFullYear() !== +fy || a.date.getMonth() !== +fm) return false;
-      }
-      return true;
-    })
-    .sort((a, b) => b.date - a.date);
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// UNIT CONVERSION HELPERS
-// ═════════════════════════════════════════════════════════════════════════════
-
-function formatDistance(metres) {
-  if (units === 'imperial') {
-    const miles = metres / 1609.344;
-    return miles >= 10 ? `${miles.toFixed(1)} mi` : `${miles.toFixed(2)} mi`;
-  }
-  const km = metres / 1000;
-  return km >= 10 ? `${km.toFixed(1)} km` : `${km.toFixed(2)} km`;
-}
-
-function formatElevation(metres) {
-  if (metres === null || metres === undefined) return '—';
-  if (units === 'imperial') return `${Math.round(metres * 3.28084)} ft`;
-  return `${Math.round(metres)} m`;
-}
-
-function formatMovingTime(seconds) {
-  const h = Math.floor(seconds / 3600);
-  if (h >= 100) return `${h.toLocaleString()}h`;
-  const m = Math.floor((seconds % 3600) / 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
-
-function formatDuration(seconds) {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-  return `${m}:${String(s).padStart(2,'0')}`;
-}
-
-function formatPace(distance_m, duration_s) {
-  if (!distance_m || !duration_s) return '—';
-  if (units === 'imperial') {
-    const miles = distance_m / 1609.344;
-    const secPerMile = duration_s / miles;
-    const m = Math.floor(secPerMile / 60);
-    const s = Math.floor(secPerMile % 60);
-    return `${m}:${String(s).padStart(2,'0')} /mi`;
-  }
-  const km = distance_m / 1000;
-  const secPerKm = duration_s / km;
-  const m = Math.floor(secPerKm / 60);
-  const s = Math.floor(secPerKm % 60);
-  return `${m}:${String(s).padStart(2,'0')} /km`;
-}
-
-/** Speed reads better than pace for rides. */
-function formatSpeed(distance_m, duration_s) {
-  if (!distance_m || !duration_s) return '—';
-  const perHour = (distance_m / duration_s) * 3600;
-  return units === 'imperial'
-    ? `${(perHour / 1609.344).toFixed(1)} mph`
-    : `${(perHour / 1000).toFixed(1)} km/h`;
-}
-
-/** Formatters bundled for charts/stats.js, which has no unit state of its own. */
-function formatters() {
-  return {
-    units,
-    distance:   formatDistance,
-    elevation:  formatElevation,
-    movingTime: formatMovingTime,
-    duration:   formatDuration,
-    pace:       formatPace,
-    speed:      formatSpeed,
-  };
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// DASHBOARD RENDERING
-// ═════════════════════════════════════════════════════════════════════════════
-
-const TYPE_ICONS = {
-  Run:   '🏃',
-  Ride:  '🚴',
-  Walk:  '🚶',
-  Hike:  '🥾',
-  Swim:  '🏊',
-  Other: '⚡',
-};
-
-async function showDashboard() {
-  closeUploadModal();
-  document.getElementById('app-nav').classList.add('visible');
-  const dash = document.getElementById('dashboard-screen');
-  dash.classList.add('visible');
-
-  // Init map immediately while container is visible so invalidateSize works.
-  // Pre-load the first routable activity's first trackpoint so the map opens
-  // near real data instead of flashing a world view at [20,0].
-  if (!heatmapInstance) {
-    const initialCenter = await getInitialMapCenter();
-    heatmapInstance = initHeatmap(
-      document.getElementById('heatmap'),
-      initialCenter ? { center: initialCenter, zoom: 11 } : {},
-    );
-    heatmapInstance.on('click', clearRouteSelection);
-  }
-
-  refreshDashboard();
-  showDuplicateBanner();
-
-  // Default to Map view after loading
-  switchView('map');
-
-  window.scrollTo({ top: 0, behavior: 'auto' });
-
-  setTimeout(() => {
-    heatmapInstance.invalidateSize();
-  }, 150);
-}
-
-/**
- * Switch between top-level views (map / charts / photos).
- * Views are peers under the persistent top nav.
- */
-function switchView(view) {
-  // Nav tab active state
-  document.querySelectorAll('.nav-tab').forEach(t => {
-    t.classList.toggle('active', t.dataset.view === view);
-  });
-  // Toggle dashboard subview containers (map, charts) and the photos screen
-  const dash = document.getElementById('dashboard-screen');
-  const photosScreen = document.getElementById('photos-screen');
-  dash.classList.toggle('view-map-active', view === 'map');
-  document.body.classList.toggle('view-map-active', view === 'map');
-  if (view === 'photos') {
-    dash.classList.remove('visible');
-    photosScreen.classList.add('visible');
-    renderCurrentPhotosList();
-  } else {
-    dash.classList.add('visible');
-    photosScreen.classList.remove('visible');
-    document.querySelectorAll('#dashboard-screen .app-view').forEach(v => {
-      v.classList.toggle('active', v.dataset.view === view);
-    });
-    // Leaflet needs to re-measure if the map view just became visible
-    if (view === 'map') {
-      syncNavHeight();   // the map's height is viewport minus the nav
-      setTimeout(() => { try { heatmapInstance?.invalidateSize(); } catch {} }, 100);
-    } else if (view === 'charts') {
-      // Same reason as the collapse handlers: charts drawn into a hidden view
-      // fall back to a placeholder width.
-      redrawCharts();
-    }
-  }
-  window.scrollTo({ top: 0, behavior: 'auto' });
-}
-
-function openUploadModal() {
-  document.getElementById('upload-modal-backdrop').classList.add('visible');
-  document.body.style.overflow = 'hidden';
-}
-
-function closeUploadModal() {
-  document.getElementById('upload-modal-backdrop').classList.remove('visible');
-  document.body.style.overflow = '';
-}
-
-/**
- * Look up the first routable activity and load its first GPX trackpoint.
- * Returns [lat, lng] or null on failure. Cost: 1 GPX read (~50-200ms).
- */
-async function getInitialMapCenter() {
-  const routable = allActivities.filter(a => a.has_route || a.route_points);
-  for (const act of routable) {
-    if (act.route_points && act.route_points.length) {
-      const p = act.route_points.find(x => x.lat !== null && x.lng !== null);
-      if (p) return [p.lat, p.lng];
-    }
-    if (typeof act._gpxLoader === 'function') {
-      try {
-        const pts = await act._gpxLoader();
-        act.route_points = pts;
-        const p = pts?.find(x => x.lat !== null && x.lng !== null);
-        if (p) return [p.lat, p.lng];
-      } catch { /* try next activity */ }
-    }
-  }
+/** Nav tab that should look active for a view (sub-views light up their parent). */
+function navTabFor(view) {
+  const nav = getMode().nav.map(n => n.view);
+  if (view === 'activity') return 'feed';
+  if (nav.includes(view)) return view;
+  if (view === 'charts' && nav.includes('profile')) return 'profile';
   return null;
 }
 
-async function renderCurrentPhotosList() {
+function resolveView(view) {
+  if (!KNOWN_VIEWS.has(view)) return getMode().landing;
+  // A view the current mode has no tab for is still reachable by link; only
+  // views with nothing to show for this data fall back to the landing view.
+  if (view === 'today' && !state.summaries.length && getMode().id === 'strava') return getMode().landing;
+  return view;
+}
+
+async function onRoute({ view, param }) {
+  if (!state.activities.length && !state.summaries.length) { openUpload(); return; }
+  const target = resolveView(view || getMode().landing);
+  if (target !== view) { navigate(target, null, { replace: true }); return; }
+  await showView(target, param);
+}
+
+async function showView(view, param = null) {
+  const leaving = currentView;
+  if (leaving === 'activity' && (view !== 'activity' || param !== currentParam)) destroyActivity();
+  if (leaving === 'map' && view !== 'map') { tlStop(); if (isMapFullscreen()) setMapFullscreen(false); }
+
+  currentView = view;
+  currentParam = param;
+
+  // Active states
+  const tab = navTabFor(view);
+  document.querySelectorAll('#nav-tabs .nav-tab').forEach(t => {
+    const on = t.dataset.view === tab;
+    if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
+    t.classList.toggle('active', on);
+  });
+
+  const isPhotos = view === 'photos';
+  document.getElementById('photos-screen').classList.toggle('visible', isPhotos);
+  document.getElementById('dashboard-screen').classList.toggle('visible', !isPhotos);
+  document.querySelectorAll('#dashboard-screen > .app-view').forEach(v => v.classList.toggle('active', v.dataset.view === view));
+  document.body.classList.toggle('view-map-active', view === 'map');
+  document.body.dataset.view = view;
+  syncNavHeight();
+
+  // Render (the view must be visible first: Leaflet and D3 measure their container)
+  try {
+    if (view === 'activity') await renderActivity(param);
+    else if (renderers[view] && (dirty.has(view) || view === 'map')) { dirty.delete(view); await renderers[view](); }
+  } catch (e) {
+    console.error(`Rendering "${view}" failed`, e);
+    showToast('Something went wrong drawing this view. Check the console for details.', { error: true });
+  }
+
+  if (view === 'map') invalidateMap();
+  if (view === 'charts') redrawCharts();
+  if (leaving !== view || leaving === 'activity') window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+/** Something the active view shows has changed: mark everything stale, redraw what's visible. */
+function refresh() {
+  Object.keys(renderers).forEach(v => dirty.add(v));
+  if (!state.activities.length && !state.summaries.length) return;
+  if (currentView) showView(currentView, currentParam);
+}
+
+on('data', () => { syncWelcome(); resetMapDrawing(); resetFeedPaging(); buildChrome(); updatePhotosBadge(); showMergeBanner(); refresh(); });
+on('filters', refresh);
+on('theme', () => { restyleMapForTheme(); if (currentView === 'activity') showView('activity', currentParam); });
+on('units', refresh);
+on('mode', () => { resetMapDrawing(); resetFeedPaging(); buildChrome(); updatePhotosBadge(); showMergeBanner(); refresh(); });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// CHROME: nav tabs, mode switch, theme, menu
+// ═════════════════════════════════════════════════════════════════════════════
+
+function buildChrome() {
+  const mode = getMode();
+  document.body.dataset.mode = mode.id;
+  document.getElementById('app-nav').classList.add('visible');
+
+  // Tabs (links, so they work with middle-click and keyboard)
+  document.getElementById('nav-tabs').innerHTML = mode.nav.map(n => `
+    <a class="nav-tab" data-view="${n.view}" href="${hrefFor(n.view)}" ${n.view === 'photos' ? 'id="nav-tab-photos"' : ''}>
+      ${icon(VIEW_ICON[n.view] || 'feed')}<span>${n.label}</span>${n.view === 'photos' ? '<span class="nav-badge" id="nav-photos-badge" hidden></span>' : ''}
+    </a>`).join('');
+
+  // Mode switch
+  document.getElementById('mode-switch').innerHTML = MODE_IDS.map(id => {
+    const ok = modeAvailable(id, state.has);
+    const title = ok ? MODES[id].blurb : `${MODES[id].label} view needs ${MODES[id].source === 'apple' ? 'an Apple Health' : 'a Strava'} export`;
+    return `<button type="button" role="radio" aria-checked="${mode.id === id}" data-mode="${id}" ${ok ? '' : 'disabled'} title="${title}">${MODES[id].label}</button>`;
+  }).join('');
+
+  updatePhotosBadge();
+  syncNavHeight();
+}
+
+function wireChrome() {
+  document.getElementById('brand-mark').innerHTML = BRAND_MARK;
+  document.getElementById('btn-menu').innerHTML = icon('menu');
+  document.getElementById('btn-open-upload').innerHTML = `${icon('upload', { size: 18 })}<span>Add or replace data</span>`;
+  document.getElementById('btn-delete-data').innerHTML = `${icon('trash', { size: 18 })}<span>Delete my data</span>`;
+
+  document.getElementById('mode-switch').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-mode]');
+    if (!b || b.disabled) return;
+    setMode(b.dataset.mode, state.has);
+    const m = getMode();
+    // If the current view doesn't exist in the new mode, land somewhere sensible.
+    if (!viewAllowed(currentView, m) && currentView !== 'charts') navigate(m.landing, null, { replace: true });
+    emit('mode');
+  });
+
+  // Theme: light by default; dark is a choice that sticks.
+  document.getElementById('btn-theme-toggle').addEventListener('click', toggleTheme);
+
+  // Settings menu
+  const menuBtn = document.getElementById('btn-menu');
+  const pop = document.getElementById('menu-pop');
+  const setMenu = (open) => {
+    pop.hidden = !open;
+    menuBtn.setAttribute('aria-expanded', String(open));
+    if (open) pop.querySelector('button')?.focus();
+  };
+  menuBtn.addEventListener('click', () => setMenu(pop.hidden));
+  document.addEventListener('click', (e) => { if (!pop.hidden && !e.target.closest('.menu-wrap')) setMenu(false); });
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') { setMenu(false); menuBtn.focus(); } });
+
+  document.getElementById('btn-metric').addEventListener('click', () => pickUnits('metric'));
+  document.getElementById('btn-imperial').addEventListener('click', () => pickUnits('imperial'));
+  syncUnitButtons();
+
+  document.getElementById('btn-open-upload').addEventListener('click', () => { setMenu(false); openUpload(); });
+
+  // Two-step delete: first click arms it, second confirms.
+  const del = document.getElementById('btn-delete-data');
+  let armed = null;
+  del.addEventListener('click', async () => {
+    if (!armed) {
+      del.querySelector('span').textContent = 'Click again to delete everything';
+      armed = setTimeout(() => { armed = null; del.querySelector('span').textContent = 'Delete my data'; }, 4000);
+      return;
+    }
+    clearTimeout(armed); armed = null;
+    del.querySelector('span').textContent = 'Delete my data';
+    setMenu(false);
+    await deleteAllData();
+    resetMapDrawing();
+    if (state.heatmap) { try { state.heatmap.remove(); } catch { /* gone */ } state.heatmap = null; }
+    document.getElementById('app-nav').classList.remove('visible');
+    document.querySelectorAll('#dashboard-screen > .app-view').forEach(v => v.classList.remove('active'));
+    history.replaceState(null, '', location.pathname);
+    showToast('All saved data deleted from this browser.');
+    syncWelcome();
+    openUpload();
+  });
+}
+
+function pickUnits(next) {
+  setUnits(next, true);
+  syncUnitButtons();
+  emit('units');
+}
+
+function syncUnitButtons() {
+  const u = getUnits();
+  const m = document.getElementById('btn-metric'), i = document.getElementById('btn-imperial');
+  m.classList.toggle('active', u === 'metric'); i.classList.toggle('active', u === 'imperial');
+  m.setAttribute('aria-pressed', String(u === 'metric')); i.setAttribute('aria-pressed', String(u === 'imperial'));
+}
+
+// ── Theme ────────────────────────────────────────────────────────────────────
+
+function applyTheme() {
+  document.documentElement.classList.toggle('dark-mode', state.dark);
+  const btn = document.getElementById('btn-theme-toggle');
+  if (btn) {
+    btn.innerHTML = icon(state.dark ? 'sun' : 'moon');
+    btn.setAttribute('aria-pressed', String(state.dark));
+    btn.setAttribute('aria-label', state.dark ? 'Switch to light mode' : 'Switch to dark mode');
+    btn.title = state.dark ? 'Light mode' : 'Dark mode';
+  }
+  setHeatmapTheme(state.dark);
+}
+
+function toggleTheme() {
+  state.dark = !state.dark;
+  safeStorage.set('fitness-theme', state.dark ? 'dark' : 'light');
+  applyTheme();
+  emit('theme');
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// MERGE BANNER
+// ═════════════════════════════════════════════════════════════════════════════
+
+let bannerDismissedFor = -1;
+
+function showMergeBanner() {
+  const banner = document.getElementById('duplicate-banner');
+  if (!banner) return;
+  const n = mergedCount();
+  const show = getMode().id === 'hybrid' && n > 0 && bannerDismissedFor !== n;
+  banner.hidden = !show;
+  document.getElementById('dup-count').textContent = n.toLocaleString();
+  syncNavHeight();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// UPLOAD DIALOG
+// ═════════════════════════════════════════════════════════════════════════════
+
+let closeUploadDialog = null;
+
+/** First run (or after deleting data): show a way back to the upload dialog, never a blank page. */
+function syncWelcome() {
+  const w = document.getElementById('welcome');
+  if (w) w.hidden = state.activities.length > 0 || state.summaries.length > 0;
+}
+
+function openUpload() {
+  if (closeUploadDialog) return;
+  const backdrop = document.getElementById('upload-modal-backdrop');
+  const dialog = document.getElementById('upload-screen');
+  closeUploadDialog = openModal(backdrop, dialog, () => { closeUploadDialog = null; });
+}
+
+function closeUpload() { closeUploadDialog?.(); }
+
+async function runUpload() {
+  const { loaded, errors } = await parseStaged();
+  if (!state.activities.length && !state.summaries.length) return; // nothing usable; stay in the dialog with the error shown
+  if (errors.length) { showToast(`Some files had problems: ${errors.join('; ')}`, { error: true }); return; }
+
+  closeUpload();
+  restoreMode(state.has);
+  buildChrome();
+  showToast(`Loaded ${loaded.toLocaleString()} activities${state.photos.length ? ` · ${state.photoMatch.matched} photos matched` : ''}`);
+  navigate(getMode().landing, null, { replace: true });
+  saveRoutesInBackground();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PHOTOS
+// ═════════════════════════════════════════════════════════════════════════════
+
+function updatePhotosBadge() {
+  const badge = document.getElementById('nav-photos-badge');
+  const n = state.photoMatch?.matched || 0;
+  if (badge) { badge.textContent = n ? String(n) : ''; badge.hidden = !n; }
+  const tab = document.getElementById('nav-tab-photos');
+  if (tab) {
+    tab.setAttribute('aria-disabled', String(n === 0));
+    tab.title = n ? '' : 'Add photos or videos from the menu to build a Photo Tour';
+  }
+}
+
+function renderPhotosView() {
   const body = document.getElementById('photos-screen-body');
-  renderPhotosList(body, photoMatchSummary.activitiesWithPhotos, {
-    bufferMinutes: photoBufferMinutes,
-    totalPhotos: allPhotos.length,
-    unmatched: photoMatchSummary.unmatched,
+  renderPhotosList(body, state.photoMatch.activitiesWithPhotos, {
+    bufferMinutes: state.photoBuffer,
+    totalPhotos: state.photos.length,
+    unmatched: state.photoMatch.unmatched,
     onBufferChange: async (n) => {
-      photoBufferMinutes = n;
-      photoMatchSummary = await matchPhotosToActivities(allPhotos, allActivities, {
-        bufferMinutes: n,
-      });
-      updatePhotosNav();
-      renderCurrentPhotosList();
+      state.photoBuffer = n;
+      await rematchPhotos();
+      updatePhotosBadge();
+      renderPhotosView();
     },
     onOpen: (a) => showPhotosDetail(a),
   });
 }
 
-function showPhotosView() {
-  switchView('photos');
-}
-
 async function showPhotosDetail(activity) {
   const body = document.getElementById('photos-screen-body');
-  await renderPhotosDetail(body, activity, {
-    onBack: () => showPhotosView(),
-  });
-}
-
-function updatePhotosNav() {
-  const badge = document.getElementById('nav-photos-badge');
-  const tab   = document.getElementById('nav-tab-photos');
-  const n = photoMatchSummary?.matched || 0;
-  if (badge) {
-    if (n > 0) { badge.textContent = String(n); badge.hidden = false; }
-    else       { badge.textContent = ''; badge.hidden = true; }
-  }
-  if (tab) tab.disabled = n === 0;
-}
-
-function showDuplicateBanner() {
-  const banner = document.getElementById('duplicate-banner');
-  if (!banner) return;
-
-  const pairs = getDuplicateCount();
-  if (pairs === 0) {
-    banner.style.display = 'none';
-    syncNavHeight();
-    return;
-  }
-
-  banner.style.display = 'flex';
-  document.getElementById('dup-count').textContent = pairs;
-  syncNavHeight();
-}
-
-function dismissDuplicateBanner() {
-  const banner = document.getElementById('duplicate-banner');
-  if (banner) banner.style.display = 'none';
-  syncNavHeight();
-}
-
-function refreshDashboard() {
-  const filtered = getFilteredActivities();
-
-  updateSourceBadges();
-  updateStatsBar(filtered);
-  updateFiltersSummary(filtered);
-  renderActivityList(filtered);
-
-  try { renderCharts(filtered); } catch (e) { console.error('Chart error:', e); }
-  try { renderAllStats(filtered); } catch (e) { console.error('Stats error:', e); }
-  try { renderMonthsTab(getFilteredBaseActivities()); } catch (e) { console.error('Month tab error:', e); }
-
-  refreshHeatmap(filtered);
-}
-
-/** Full stats panel. Stats live on the Stats view only — the Map view is the map. */
-function renderAllStats(filtered) {
-  const fmt = formatters();
-
-  const detail = document.getElementById('stats-detail');
-  if (detail) {
-    renderStats(detail, filtered, {
-      fmt,
-      typeColors: TYPE_COLORS,
-      onOpenActivity: (id) => {
-        const act = allActivities.find(a => a.id === id);
-        if (act) openDetail(act);
-      },
-    });
-  }
-
-}
-
-/** One-line description of the active filters, shown in the panel header. */
-function updateFiltersSummary(filtered) {
-  const el = document.getElementById('filters-summary');
-  if (!el) return;
-
-  const parts = [];
-  if (filters.type !== 'All')  parts.push(filters.type);
-  if (filters.search)          parts.push(`“${filters.search}”`);
-  if (filters.month) {
-    const [y, m] = filters.month.split('-');
-    parts.push(new Date(+y, +m, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }));
-  }
-  if (filters.from)            parts.push(`from ${filters.from.toLocaleDateString('en-US')}`);
-  if (filters.to)              parts.push(`to ${filters.to.toLocaleDateString('en-US')}`);
-  if (filters.duplicatesOnly)  parts.push('duplicates only');
-
-  el.textContent = parts.length
-    ? `${parts.join(' · ')} — ${filtered.length.toLocaleString()} of ${allActivities.length.toLocaleString()} activities`
-    : `Showing all ${allActivities.length.toLocaleString()} activities`;
-}
-
-function updateSourceBadges() {
-  const sources = [...new Set(allActivities.map(a => a.source))];
-  const container = document.getElementById('dash-source-badges');
-  if (!container) return;
-  container.innerHTML = sources.map(s => {
-    const count = allActivities.filter(a => a.source === s).length;
-    return `<span class="source-badge ${s}">${s} ${count}</span>`;
-  }).join('');
-}
-
-function updateStatsBar(activities) {
-  const totalDist = activities.reduce((sum, a) => sum + (a.distance_m || 0), 0);
-  const totalElev = activities.reduce((sum, a) => sum + (a.elevation_gain_m || 0), 0);
-  const totalSecs = activities.reduce((sum, a) => sum + (a.duration_s || 0), 0);
-
-  // Avg pace — only for run/ride/walk/hike activities with both distance and time
-  const paceable = activities.filter(a =>
-    ['Run','Ride','Walk','Hike'].includes(a.type) && a.distance_m > 100 && a.duration_s > 0
-  );
-  const avgPaceStr = paceable.length > 0
-    ? formatPace(
-        paceable.reduce((s,a) => s + a.distance_m, 0),
-        paceable.reduce((s,a) => s + a.duration_s, 0)
-      )
-    : '—';
-
-  const dates = activities.map(a => a.date).filter(Boolean).sort((a,b)=>a-b);
-  const rangeStr = dates.length >= 2
-    ? `${dates[0].getFullYear()}–${dates[dates.length-1].getFullYear()}`
-    : dates.length === 1 ? String(dates[0].getFullYear()) : '—';
-
-  document.getElementById('stat-total').textContent     = activities.length.toLocaleString();
-  document.getElementById('stat-distance').textContent  = formatDistance(totalDist);
-  document.getElementById('stat-time').textContent      = formatMovingTime(totalSecs);
-  document.getElementById('stat-elevation').textContent = formatElevation(totalElev);
-  document.getElementById('stat-pace').textContent      = avgPaceStr;
-  document.getElementById('stat-range').textContent     = rangeStr;
-
-  const countLbl = document.getElementById('list-count-label');
-  if (countLbl) countLbl.textContent = `${activities.length.toLocaleString()} activities`;
-}
-
-function renderActivityList(activities) {
-  const list = document.getElementById('activity-list');
-  list.innerHTML = '';
-
-  if (activities.length === 0) {
-    list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;">No activities match your filters.</div>';
-    return;
-  }
-
-  const frag = document.createDocumentFragment();
-
-  for (const activity of activities) {
-    const row = document.createElement('div');
-    row.className = 'activity-row';
-    row.dataset.id = activity.id;
-
-    const icon = TYPE_ICONS[activity.type] || '⚡';
-    const dateStr = activity.date
-      ? activity.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-      : '';
-    const hrStr = activity.avg_heart_rate ? `❤️ ${activity.avg_heart_rate}` : '';
-
-    row.innerHTML = `
-      <div class="activity-type-icon">${icon}</div>
-      <div class="activity-info">
-        <div class="activity-name">${escapeHtml(activity.name)}</div>
-        <div class="activity-meta">${dateStr}${hrStr ? ' · ' + hrStr : ''}</div>
-      </div>
-      <div class="activity-stats">
-        <div class="activity-dist">${formatDistance(activity.distance_m)}</div>
-        <div class="activity-dur">${formatDuration(activity.duration_s)}</div>
-      </div>
-      <span class="activity-source-badge ${activity.source}">${activity.source}</span>
-      ${activity.has_duplicate ? dupBadge(activity) : ''}
-    `;
-
-    row.addEventListener('click', () => openDetail(activity));
-    frag.appendChild(row);
-  }
-
-  list.appendChild(frag);
-}
-
-/** Re-draw the D3 charts at their real container width. */
-function redrawCharts() {
-  if (allActivities.length === 0) return;
-  try { renderCharts(getFilteredActivities()); } catch (e) { console.error('Chart error:', e); }
-}
-
-function renderCharts(activities) {
-  const sorted = [...activities].sort((a, b) => a.date - b.date);
-
-  renderDistanceChart(sorted, document.getElementById('chart-distance'), units);
-  renderWeeklyChart(activities, document.getElementById('chart-weekly'), units);
-  renderRecords(activities, document.getElementById('chart-records'), units, openDetail);
-
-  // HR zones — only show if we have HR data
-  const hasHR = activities.some(a => a.avg_heart_rate || (a.route_points && a.route_points.some(p => p.hr)));
-  const hrCard = document.getElementById('chart-hr-card');
-  if (hasHR) {
-    hrCard.style.display = 'block';
-    const maxHR = 200;
-    renderHRZones(activities, document.getElementById('chart-hr-zones'), maxHR);
-  } else {
-    hrCard.style.display = 'none';
-  }
+  await renderPhotosDetail(body, activity, { onBack: () => renderPhotosView() });
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// COLLAPSIBLE PANELS
-//
-// Any element carrying `data-collapse="<key>"` is a toggle; the section it
-// collapses is its closest .panel / .chart-card / #explore-panel ancestor, which
-// gets the `collapsed` class (CSS hides that section's .collapsible-body).
-// State is keyed by <key> in localStorage so a layout you set up survives a
-// reload — the point of collapsing is usually "leave the map big".
+// BOOT
 // ═════════════════════════════════════════════════════════════════════════════
 
-const COLLAPSE_PREFIX = 'fitness-collapsed:';
+document.addEventListener('DOMContentLoaded', async () => {
+  // Theme: light unless the user chose dark.
+  state.dark = safeStorage.get('fitness-theme') === 'dark';
 
-/** Sections that start folded. The map's tools strip does, so the Map view
- *  opens as just the map. */
-const COLLAPSED_BY_DEFAULT = { explore: true };
+  wireChrome();
+  applyTheme();
+  setupUploadZones();
+  initCollapsibles((key) => {
+    if (key === 'explore') invalidateMap();
+    else redrawCharts();
+  });
+  initStatsView();
+  initMapView();
 
-function collapseSectionFor(toggle) {
-  return toggle.closest('.panel, .chart-card, #explore-panel');
-}
+  document.getElementById('btn-go').addEventListener('click', runUpload);
+  document.getElementById('btn-welcome-upload').addEventListener('click', openUpload);
+  document.getElementById('btn-close-upload').addEventListener('click', closeUpload);
+  document.getElementById('upload-modal-backdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'upload-modal-backdrop') closeUpload();
+  });
+  document.getElementById('btn-photos-back').addEventListener('click', () => navigate(getMode().landing));
 
-function isCollapsed(key) {
-  const stored = localStorage.getItem(COLLAPSE_PREFIX + key);
-  if (stored === null) return !!COLLAPSED_BY_DEFAULT[key];
-  return stored === '1';
-}
-
-function setCollapsed(key, collapsed) {
-  const toggle = document.querySelector(`[data-collapse="${key}"]`);
-  if (!toggle) return;
-  const section = collapseSectionFor(toggle);
-  if (!section) return;
-
-  section.classList.toggle('collapsed', collapsed);
-  toggle.setAttribute('aria-expanded', String(!collapsed));
-  localStorage.setItem(COLLAPSE_PREFIX + key, collapsed ? '1' : '0');
-
-  // Charts measured 0px wide while their section was hidden.
-  if (!collapsed && key === 'charts') redrawCharts();
-
-  const label = toggle.querySelector('.panel-toggle-label');
-  if (label) label.textContent = collapsed ? 'Show tools' : 'Hide tools';
-
-  // Leaflet measures on layout; collapsing the explore panel resizes the map.
-  if (section.id === 'explore-panel') {
-    setTimeout(() => { try { heatmapInstance?.invalidateSize(); } catch {} }, 60);
-  }
-}
-
-function initCollapsibles() {
-  document.querySelectorAll('[data-collapse]').forEach(toggle => {
-    const key = toggle.dataset.collapse;
-    setCollapsed(key, isCollapsed(key));
-    toggle.addEventListener('click', () => {
-      setCollapsed(key, !collapseSectionFor(toggle)?.classList.contains('collapsed'));
-    });
+  document.getElementById('btn-dup-review').addEventListener('click', () => {
+    state.filters.duplicatesOnly = true;
+    navigate('feed');
+    emit('filters');
+  });
+  document.getElementById('btn-dup-dismiss').addEventListener('click', () => {
+    bannerDismissedFor = mergedCount();
+    showMergeBanner();
   });
 
-  // Chart cards collapse from their own title, keyed by the chart's id.
-  document.querySelectorAll('.chart-card .card-toggle').forEach(btn => {
-    const card = btn.closest('.chart-card');
-    const key  = `card-${card.querySelector('[id^="chart-"]')?.id || card.id}`;
-    const collapsed = isCollapsed(key);
-    card.classList.toggle('collapsed', collapsed);
-    btn.setAttribute('aria-expanded', String(!collapsed));
-    btn.addEventListener('click', () => {
-      const next = !card.classList.contains('collapsed');
-      card.classList.toggle('collapsed', next);
-      btn.setAttribute('aria-expanded', String(!next));
-      localStorage.setItem(COLLAPSE_PREFIX + key, next ? '1' : '0');
-      // D3 sizes to the container, which measured 0 while collapsed.
-      if (!next) redrawCharts();
-    });
-  });
-
-  // "Collapse all" / "Expand all" for the Stats & Charts view
-  const allBtn = document.getElementById('btn-collapse-all');
-  allBtn?.addEventListener('click', () => {
-    const panels = ['stats', 'filters', 'activities', 'charts'];
-    const anyOpen = panels.some(k => !isCollapsed(k));
-    panels.forEach(k => setCollapsed(k, anyOpen));
-    allBtn.textContent = anyOpen ? 'Expand all sections' : 'Collapse all sections';
-  });
-  if (allBtn) {
-    const anyOpen = ['stats', 'filters', 'activities', 'charts'].some(k => !isCollapsed(k));
-    allBtn.textContent = anyOpen ? 'Collapse all sections' : 'Expand all sections';
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// FULL-SCREEN MAP
-// The nav stays put; the map grows to the rest of the viewport and the explore
-// panel steps aside. --nav-h is measured rather than hard-coded because the nav
-// wraps to two rows under 700px.
-// ═════════════════════════════════════════════════════════════════════════════
-
-/**
- * Publish the height of everything stacked above the map as `--nav-h`, so the
- * Map view can size itself to the rest of the viewport. That's the nav plus the
- * duplicate banner when it's showing — measured, not hard-coded, because the
- * nav wraps to two rows below 700px and the banner comes and goes.
- */
-function syncNavHeight() {
-  const nav    = document.getElementById('app-nav');
-  const banner = document.getElementById('duplicate-banner');
-  const navH    = nav ? nav.offsetHeight : 56;
-  const bannerH = banner && banner.offsetParent !== null ? banner.offsetHeight : 0;
-  document.body.style.setProperty('--nav-h', `${navH + bannerH}px`);
-}
-
-function setMapFullscreen(on) {
-  document.body.classList.toggle('map-fullscreen', on);
-  // Measure after the class lands: full-screen mode drops the brand from the
-  // nav on narrow screens, so the nav is a different height than it just was.
-  requestAnimationFrame(syncNavHeight);
-
-  const btn = document.getElementById('btn-map-fullscreen');
-  if (btn) {
-    btn.setAttribute('aria-pressed', String(on));
-    btn.querySelector('.map-icon-label').textContent = on ? 'Exit full map' : 'Expand map';
-    btn.title = on ? 'Back to the normal layout (Esc)' : 'Fill the screen with the map (F, or Esc to exit)';
-  }
-
-  if (on) window.scrollTo({ top: 0, behavior: 'auto' });
-  setTimeout(() => { try { heatmapInstance?.invalidateSize(); } catch {} }, 80);
-}
-
-function toggleMapFullscreen() {
-  setMapFullscreen(!document.body.classList.contains('map-fullscreen'));
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// ROUTE SELECTION
-//
-// The Map view is the map, so the routes themselves are the interface: hover
-// previews one, click pins it in a card with the numbers and a way into the
-// full detail view. Selection is independent of the filters — it's a pointer at
-// one activity, not a filter state.
-// ═════════════════════════════════════════════════════════════════════════════
-
-/** @type {Activity|null} Pinned route, if any */
-let _selectedRoute = null;
-
-function routeCardEls() {
-  return {
-    card:    document.getElementById('route-card'),
-    type:    document.getElementById('route-card-type'),
-    name:    document.getElementById('route-card-name'),
-    date:    document.getElementById('route-card-date'),
-    stats:   document.getElementById('route-card-stats'),
-    actions: document.getElementById('route-card-actions'),
-    hint:    document.getElementById('route-card-hint'),
-    close:   document.getElementById('btn-route-clear'),
-  };
-}
-
-function renderRouteCard(activity, { pinned }) {
-  const els = routeCardEls();
-  if (!els.card || !activity) return;
-
-  els.card.hidden = false;
-  els.card.classList.toggle('previewing', !pinned);
-
-  const color = TYPE_COLORS[activity.type] || TYPE_COLORS.Other;
-  els.type.textContent = activity.type;
-  els.type.style.background = color;
-  els.name.textContent = activity.name;
-  els.date.textContent = [
-    activity.date?.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }),
-    activity.source,
-  ].filter(Boolean).join(' · ');
-
-  const rows = [
-    ['Distance', formatDistance(activity.distance_m)],
-    ['Duration', formatDuration(activity.duration_s)],
-    ['Pace',     formatPace(activity.distance_m, activity.duration_s)],
-    ['Climb',    formatElevation(activity.elevation_gain_m)],
-  ];
-  if (activity.avg_heart_rate) rows.push(['Avg HR', `${activity.avg_heart_rate} bpm`]);
-  if (typeof activity._freqScore === 'number' && activity._freqScore > 0) {
-    rows.push(['Shared by', `${activity._freqScore} ${activity._freqScore === 1 ? 'activity' : 'activities'}`]);
-  }
-
-  els.stats.innerHTML = rows.map(([label, value]) => `
-    <div>
-      <span class="route-card-stat-lbl">${escapeHtml(label)}</span>
-      <span class="route-card-stat-val">${escapeHtml(value)}</span>
-    </div>`).join('');
-
-  els.actions.hidden = !pinned;
-  els.close.hidden   = !pinned;
-  els.hint.textContent = pinned ? 'Esc or the map background clears this' : 'Click the route to pin it';
-}
-
-function hideRouteCard() {
-  const els = routeCardEls();
-  if (els.card) els.card.hidden = true;
-}
-
-function previewRoute(activity, entering) {
-  if (entering) {
-    highlightRoute(activity, { preview: true });
-    renderRouteCard(activity, { pinned: false });
-  } else if (_selectedRoute) {
-    // Fall back to whatever is pinned rather than clearing outright.
-    highlightRoute(_selectedRoute, { preview: false });
-    renderRouteCard(_selectedRoute, { pinned: true });
-  } else {
-    clearHighlight();
-    hideRouteCard();
-  }
-}
-
-function selectRoute(activity) {
-  _selectedRoute = activity;
-  highlightRoute(activity, { preview: false });
-  renderRouteCard(activity, { pinned: true });
-}
-
-function clearRouteSelection() {
-  _selectedRoute = null;
-  clearHighlight();
-  hideRouteCard();
-}
-
-function initRouteInteraction() {
-  setRouteHandlers({
-    onHover: previewRoute,
-    onSelect: (activity) => {
-      if (_selectedRoute && _selectedRoute.id === activity.id) clearRouteSelection();
-      else selectRoute(activity);
-    },
-  });
-
-  document.getElementById('btn-route-clear')?.addEventListener('click', clearRouteSelection);
-  document.getElementById('btn-route-detail')?.addEventListener('click', () => {
-    if (_selectedRoute) openDetail(_selectedRoute);
-  });
-  document.getElementById('btn-route-zoom')?.addEventListener('click', () => {
-    if (_selectedRoute) zoomToRoute(_selectedRoute);
-  });
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// MAP LEGENDS
-// ═════════════════════════════════════════════════════════════════════════════
-
-function renderMapLegend() {
-  const freqMode  = getHeatStyle() === 'frequency';
-  const typeEl    = document.getElementById('map-legend-type');
-  const freqEl    = document.getElementById('map-legend-freq');
-  if (!typeEl || !freqEl) return;
-
-  // Nothing drawn yet — a legend for an empty map is just noise.
-  if (_renderedActivities.length === 0) {
-    typeEl.hidden = true;
-    freqEl.hidden = true;
-    return;
-  }
-
-  typeEl.hidden = freqMode;
-  freqEl.hidden = !freqMode;
-
-  if (freqMode) {
-    const ramp = getFrequencyRamp(_darkMode);
-    document.getElementById('map-legend-ramp').style.background =
-      `linear-gradient(90deg, ${ramp.join(', ')})`;
-    const { min, max } = getFrequencyRange();
-    document.getElementById('map-legend-min').textContent = `${min} visit${min === 1 ? '' : 's'}`;
-    document.getElementById('map-legend-max').textContent = `${max} visits`;
-    return;
-  }
-
-  // Only list the types actually on the map, so the legend stays honest.
-  const present = [...new Set(_renderedActivities.map(a => a.type))];
-  const order   = ['Run', 'Ride', 'Walk', 'Hike', 'Swim', 'Other'];
-  const items   = order.filter(t => present.includes(t));
-  const container = document.getElementById('map-legend-type-items');
-  container.innerHTML = (items.length ? items : order).map(t => `
-    <span class="map-legend-item">
-      <span class="map-legend-swatch" style="background:${TYPE_COLORS[t] || TYPE_COLORS.Other}"></span>${t}
-    </span>`).join('');
-}
-
-// ── Explore panel (Stats / Locations / By Month / Timelapse tabs) ─────────────
-
-let _exploreActiveTab = 'stats';
-let _monthFilter = null; // 'YYYY-M' or null
-
-function initExplorePanel() {
-  document.querySelectorAll('.etab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      // The strip starts collapsed to leave the map alone; picking a tab is a
-      // request to see it, so open it rather than switching a hidden pane.
-      if (document.getElementById('explore-panel')?.classList.contains('collapsed')) {
-        setCollapsed('explore', false);
-      }
-      _exploreActiveTab = btn.dataset.tab;
-      document.querySelectorAll('.etab').forEach(b => b.classList.toggle('active', b === btn));
-      document.querySelectorAll('.etab-pane').forEach(p => p.classList.toggle('active', p.id === `etab-${_exploreActiveTab}`));
-    });
-  });
-}
-
-function renderMonthsTab(activities) {
-  const container = document.getElementById('etab-months');
-  if (!container) return;
-
-  // Group by year → month
-  const yearMap = new Map();
-  for (const a of activities) {
-    if (!a.date) continue;
-    const y = a.date.getFullYear();
-    const m = a.date.getMonth(); // 0-indexed
-    if (!yearMap.has(y)) yearMap.set(y, new Array(12).fill(0));
-    yearMap.get(y)[m]++;
-  }
-
-  const years = [...yearMap.keys()].sort((a, b) => b - a);
-  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-  let html = '';
-  if (_monthFilter) {
-    html += `<button class="month-clear-btn" id="btn-month-clear">&#x2715; Show all months</button>`;
-  }
-
-  for (const year of years) {
-    const counts = yearMap.get(year);
-    const max = Math.max(1, ...counts);
-    html += `<div class="month-year-label">${year}</div><div class="month-grid">`;
-    for (let m = 0; m < 12; m++) {
-      const key = `${year}-${m}`;
-      const active = _monthFilter === key;
-      const pct = Math.round((counts[m] / max) * 100);
-      html += `<button class="month-cell ${active ? 'active' : ''} ${counts[m] === 0 ? 'empty' : ''}"
-        data-key="${key}" title="${MONTH_NAMES[m]} ${year}: ${counts[m]} activities">
-        <span class="mc-bar" style="height:${pct}%"></span>
-        <span class="mc-name">${MONTH_NAMES[m]}</span>
-        <span class="mc-count">${counts[m] || ''}</span>
-      </button>`;
+  // Photos tab is only useful with matched photos; keep the link but explain.
+  document.getElementById('nav-tabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('#nav-tab-photos');
+    if (tab && tab.getAttribute('aria-disabled') === 'true') {
+      e.preventDefault();
+      showToast('Add photos or videos (menu → Add or replace data) to build a Photo Tour.');
     }
-    html += `</div>`;
-  }
-
-  container.innerHTML = html;
-
-  container.querySelectorAll('.month-cell:not(.empty)').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const key = btn.dataset.key;
-      if (_monthFilter === key) {
-        _monthFilter = null;
-      } else {
-        _monthFilter = key;
-        const [y, m] = key.split('-');
-        // Zoom map to activities in this month
-        const monthActs = allActivities.filter(a => a.date && a.date.getFullYear() === +y && a.date.getMonth() === +m);
-        const pts = monthActs.flatMap(a => a.route_points || []).filter(p => p.lat && p.lng).map(p => [p.lat, p.lng]);
-        if (pts.length > 1 && heatmapInstance) {
-          try { heatmapInstance.fitBounds(L.latLngBounds(pts), { padding: [30, 30], animate: true }); } catch {}
-        }
-      }
-      filters.month = _monthFilter;
-      refreshDashboard();
-      renderMonthsTab(getFilteredBaseActivities());
-    });
   });
 
-  container.querySelector('#btn-month-clear')?.addEventListener('click', () => {
-    _monthFilter = null;
-    filters.month = null;
-    refreshDashboard();
-    renderMonthsTab(getFilteredBaseActivities());
-  });
-}
-
-// Activities before month filter is applied (for month tab counts)
-function getFilteredBaseActivities() {
-  const term = filters.search.toLowerCase().trim();
-  return allActivities.filter(a => {
-    if (filters.type !== 'All' && a.type !== filters.type) return false;
-    if (filters.from && a.date < filters.from) return false;
-    if (filters.to) { const t = new Date(filters.to); t.setHours(23,59,59,999); if (a.date > t) return false; }
-    if (term && !a.name.toLowerCase().includes(term) && !a.type.toLowerCase().includes(term)) return false;
-    if (filters.duplicatesOnly && !a.has_duplicate) return false;
-    return true;
-  }).sort((a, b) => b.date - a.date);
-}
-
-async function refreshHeatmap(filtered) {
-  if (!heatmapInstance) {
-    const container = document.getElementById('heatmap');
-    heatmapInstance = initHeatmap(container);
-  }
-
-  // Full re-render only on first load or when activities change globally
-  if (!_lastHeatmapCount || _lastHeatmapCount !== allActivities.length) {
-    _lastHeatmapCount = allActivities.length;
-    await renderHeatmap(allActivities, heatmapInstance);
-    renderLocationsPanel();
-  }
-
-  // Apply month/filter dimming to already-rendered polylines
-  applyHeatmapFilter(filtered);
-  renderMapLegend();
-}
-
-let _lastHeatmapCount = 0;
-
-function applyHeatmapFilter(filtered) {
-  if (!_renderedPolylines.length) return;
-  const filteredIds = new Set(filtered.map(a => a.id));
-  const hasFilter   = filters.type !== 'All' || filters.month || filters.search || filters.duplicatesOnly;
-
-  for (let i = 0; i < _renderedPolylines.length; i++) {
-    const act   = _renderedActivities[i];
-    const poly  = _renderedPolylines[i];
-    if (!poly || !act) continue;
-    const color = styleColor(act, _darkMode);
-    if (!hasFilter || filteredIds.has(act.id)) {
-      poly.setStyle({ color, ...routeStyle(_darkMode, act) });
-    } else {
-      poly.setStyle({ color, weight: 1, opacity: 0.07 });
-    }
-  }
-
-  raiseHotRoutes();
-  renderMapLegend();
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// ACTIVITY DETAIL MODAL
-// ═════════════════════════════════════════════════════════════════════════════
-
-async function openDetail(activity) {
-  const overlay = document.getElementById('detail-overlay');
-  overlay.classList.add('open');
-  document.body.style.overflow = 'hidden';
-
-  // Header
-  document.getElementById('detail-name').textContent = activity.name;
-  document.getElementById('detail-meta').textContent =
-    [
-      activity.type,
-      activity.date?.toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' }),
-      activity.source,
-    ].filter(Boolean).join(' · ');
-
-  // Stats
-  document.getElementById('dstat-distance').textContent  = formatDistance(activity.distance_m);
-  document.getElementById('dstat-duration').textContent  = formatDuration(activity.duration_s);
-  document.getElementById('dstat-pace').textContent      = formatPace(activity.distance_m, activity.duration_s);
-  document.getElementById('dstat-elevation').textContent = formatElevation(activity.elevation_gain_m);
-  document.getElementById('dstat-avg-hr').textContent    = activity.avg_heart_rate ? `${activity.avg_heart_rate} bpm` : '—';
-  document.getElementById('dstat-max-hr').textContent    = activity.max_heart_rate ? `${activity.max_heart_rate} bpm` : '—';
-
-  // Clear previous route map
-  const routeContainer = document.getElementById('detail-route-map');
-  routeContainer.innerHTML = '<div class="loading-spinner">Loading route…</div>';
-  if (detailRouteMap) {
-    detailRouteMap.remove();
-    detailRouteMap = null;
-  }
-
-  // Lazy-load GPX if needed
-  if (activity.has_route && !activity.route_points && activity._gpxLoader) {
-    try {
-      activity.route_points = await activity._gpxLoader();
-    } catch (e) {
-      console.warn('Failed to load route:', e);
-      activity.route_points = [];
-    }
-  }
-
-  // Render route map
-  detailRouteMap = renderRoute(activity, routeContainer);
-
-  // Elevation chart
-  const elevSection = document.getElementById('detail-elevation-section');
-  const elevContainer = document.getElementById('detail-elevation-chart');
-  if (activity.route_points && activity.route_points.some(p => p.ele !== null)) {
-    elevSection.style.display = 'block';
-    renderElevationChart(activity.route_points, elevContainer, units);
-  } else {
-    elevSection.style.display = 'none';
-  }
-
-  // HR chart
-  const hrSection  = document.getElementById('detail-hr-section');
-  const hrContainer = document.getElementById('detail-hr-chart');
-  if (activity.route_points && activity.route_points.some(p => p.hr !== null)) {
-    hrSection.style.display = 'block';
-    renderHRLineChart(activity.route_points, hrContainer);
-  } else {
-    hrSection.style.display = 'none';
-  }
-}
-
-function closeDetail() {
-  const overlay = document.getElementById('detail-overlay');
-  overlay.classList.remove('open');
-  document.body.style.overflow = '';
-
-  if (detailRouteMap) {
-    detailRouteMap.remove();
-    detailRouteMap = null;
-  }
-  document.getElementById('detail-route-map').innerHTML = '';
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// PROGRESS BAR
-// ═════════════════════════════════════════════════════════════════════════════
-
-function showProgress(pct, label) {
-  const container = document.getElementById('progress-container');
-  const fill      = document.getElementById('progress-fill');
-  const lbl       = document.getElementById('progress-label');
-
-  container.classList.add('visible');
-  fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
-  lbl.textContent  = label || 'Processing…';
-}
-
-function hideProgress() {
-  document.getElementById('progress-container').classList.remove('visible');
-  document.getElementById('progress-fill').style.width = '0%';
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// TOAST
-// ═════════════════════════════════════════════════════════════════════════════
-
-let _toastTimer = null;
-
-function showToast(message, duration = 3000) {
-  const el = document.getElementById('bs-toast');
-  el.textContent = message;
-  el.classList.add('show');
-  clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(() => el.classList.remove('show'), duration);
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// UNIT TOGGLE
-// ═════════════════════════════════════════════════════════════════════════════
-
-function setUnits(newUnits, explicit = true) {
-  units = newUnits;
-  localStorage.setItem('fitness-units', units);
-  // Only a click on the km/mi toggle counts as a choice; applying the stored
-  // value at startup must not silently promote the default into a preference.
-  if (explicit) localStorage.setItem('fitness-units-explicit', '1');
-
-  document.getElementById('btn-metric').classList.toggle('active', units === 'metric');
-  document.getElementById('btn-imperial').classList.toggle('active', units === 'imperial');
-
-  if (allActivities.length > 0) {
-    refreshDashboard();
-  }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// EVENT LISTENERS
-// ═════════════════════════════════════════════════════════════════════════════
-
-document.addEventListener('DOMContentLoaded', () => {
-
-  // Upload zones + Go button
-  const ALL_ZONES = SOURCES.concat(PHOTO_SOURCES);
-  ALL_ZONES.forEach(setupUploadZone);
-  ALL_ZONES.forEach(s => updateZoneUI(s));
-  updateGoButton();
-
-  document.getElementById('btn-go')?.addEventListener('click', parseAllStaged);
-
-  // Top nav — view routing
-  document.querySelectorAll('.nav-tab').forEach(tab => {
-    tab.addEventListener('click', () => switchView(tab.dataset.view));
+  setActivityHandlers({
+    openPhotos: (a) => { navigate('photos'); showPhotosDetail(a); },
   });
 
-  // Open / close upload modal from the nav
-  document.getElementById('btn-open-upload')?.addEventListener('click', openUploadModal);
-  document.getElementById('btn-close-upload')?.addEventListener('click', closeUploadModal);
-  document.getElementById('upload-modal-backdrop')?.addEventListener('click', (e) => {
-    // Click on the backdrop (not the card) closes
-    if (e.target.id === 'upload-modal-backdrop') closeUploadModal();
-  });
-
-  // Legacy Photos back button — go back to Map view
-  document.getElementById('btn-photos-back')?.addEventListener('click', () => switchView('map'));
-
-  // Auto-open the upload modal on first load if no data is present yet
-  if (allActivities.length === 0) {
-    openUploadModal();
-  }
-
-  // Duplicate banner
-  document.getElementById('btn-dup-review')?.addEventListener('click', () => {
-    filters.duplicatesOnly = true;
-    document.getElementById('filter-dup-only').checked = true;
-    dismissDuplicateBanner();
-    refreshDashboard();
-  });
-  document.getElementById('btn-dup-dismiss')?.addEventListener('click', dismissDuplicateBanner);
-
-  // Duplicates filter checkbox
-  document.getElementById('filter-dup-only')?.addEventListener('change', (e) => {
-    filters.duplicatesOnly = e.target.checked;
-    refreshDashboard();
-  });
-
-  // Unit toggle
-  document.getElementById('btn-metric').addEventListener('click',   () => setUnits('metric'));
-  document.getElementById('btn-imperial').addEventListener('click', () => setUnits('imperial'));
-  // Apply stored units (not an explicit choice — see setUnits)
-  setUnits(units, false);
-
-  // (Legacy: "New Upload" button is now the top-nav "Upload data" button)
-
-  // Search
-  document.getElementById('filter-search').addEventListener('input', (e) => {
-    filters.search = e.target.value;
-    refreshDashboard();
-  });
-
-  // Filters
-  document.getElementById('filter-type').addEventListener('change', (e) => {
-    filters.type = e.target.value;
-    refreshDashboard();
-  });
-
-  document.getElementById('filter-from').addEventListener('change', (e) => {
-    filters.from = parseDateInput(e.target.value);
-    refreshDashboard();
-  });
-
-  document.getElementById('filter-to').addEventListener('change', (e) => {
-    filters.to = parseDateInput(e.target.value);
-    refreshDashboard();
-  });
-
-  document.getElementById('btn-clear-filters').addEventListener('click', () => {
-    filters.type           = 'All';
-    filters.from           = null;
-    filters.to             = null;
-    filters.search         = '';
-    filters.duplicatesOnly = false;
-    filters.month          = null;
-    _monthFilter           = null;
-    document.getElementById('filter-type').value       = 'All';
-    document.getElementById('filter-from').value       = '';
-    document.getElementById('filter-to').value         = '';
-    document.getElementById('filter-search').value     = '';
-    const cb = document.getElementById('filter-dup-only');
-    if (cb) cb.checked = false;
-    refreshDashboard();
-  });
-
-
-  // Detail panel close
-  document.getElementById('btn-close-detail').addEventListener('click', closeDetail);
-  document.getElementById('detail-overlay').addEventListener('click', (e) => {
-    if (e.target === document.getElementById('detail-overlay')) closeDetail();
-  });
-
-  // Keyboard: Esc closes the detail panel (or leaves the full-screen map),
-  // F toggles the full-screen map when no text field has focus.
+  // Keyboard: Esc steps back one layer; F toggles the full-screen map.
   document.addEventListener('keydown', (e) => {
-    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '');
-    if (e.key === 'Escape') {
-      if (document.getElementById('detail-overlay')?.classList.contains('open')) closeDetail();
-      else if (_selectedRoute) clearRouteSelection();
-      else if (document.body.classList.contains('map-fullscreen')) setMapFullscreen(false);
-      else closeDetail();
-    } else if ((e.key === 'f' || e.key === 'F') && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
-      if (document.querySelector('.nav-tab.active')?.dataset.view === 'map') {
-        e.preventDefault();
-        toggleMapFullscreen();
-      }
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '') || e.target?.isContentEditable;
+    if (e.key === 'Escape' && !anyModalOpen()) {
+      if (hasRouteSelection()) clearRouteSelection();
+      else if (isMapFullscreen()) setMapFullscreen(false);
+    } else if ((e.key === 'f' || e.key === 'F') && !typing && !e.metaKey && !e.ctrlKey && !e.altKey && currentView === 'map') {
+      e.preventDefault();
+      toggleMapFullscreen();
     }
   });
 
-  // Collapsible panels + full-screen map + route selection
-  initCollapsibles();
-  initRouteInteraction();
-  syncNavHeight();
-  window.addEventListener('resize', syncNavHeight);
-  document.getElementById('btn-map-fullscreen')?.addEventListener('click', toggleMapFullscreen);
+  window.addEventListener('resize', () => { syncNavHeight(); });
+  startRouter(onRoute);
 
-  // Dark/light mode
-  applyTheme();
-  document.getElementById('btn-theme-toggle')?.addEventListener('click', toggleTheme);
-  document.getElementById('btn-theme-toggle-upload')?.addEventListener('click', toggleTheme);
-
-  // Explore panel tabs
-  initExplorePanel();
-
-  // Timelapse
-  document.getElementById('tl-play-btn')?.addEventListener('click', tlToggle);
-  document.getElementById('tl-reset-btn')?.addEventListener('click', tlStop);
-  document.getElementById('tl-speed')?.addEventListener('input', (e) => {
-    const val = document.getElementById('tl-speed-val');
-    if (val) val.textContent = `${e.target.value}×`;
-  });
-
-  // Heatmap style toggle (By type / Frequency)
-  document.querySelectorAll('.hm-style-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const style = btn.dataset.style;
-      if (getHeatStyle() === style) return;
-      setHeatStyle(style);
-      document.querySelectorAll('.hm-style-btn').forEach(b =>
-        b.classList.toggle('active', b === btn)
-      );
-      applyHeatmapFilter(getFilteredActivities()); // also refreshes the legend
-    });
-  });
-
-});
-
-
-// ═════════════════════════════════════════════════════════════════════════════
-// UTILITIES
-// ═════════════════════════════════════════════════════════════════════════════
-
-function dupBadge(activity) {
-  const other = activity.duplicate_of
-    ? allActivities.find(a => a.id === activity.duplicate_of)
-    : null;
-  const label = other ? `⚠ Also in ${other.source}` : '⚠ Duplicate';
-  return `<span class="duplicate-badge" title="This activity appears in multiple sources">${label}</span>`;
-}
-
-/**
- * Parse a date input's "YYYY-MM-DD" as local midnight.
- * `new Date('2024-01-01')` is parsed as *UTC* midnight, so west of Greenwich
- * the filter (and the summary line that echoes it) lands a day early.
- */
-function parseDateInput(value) {
-  if (!value) return null;
-  const [y, m, d] = value.split('-').map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d);
-}
-
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// TIMELAPSE
-// ═════════════════════════════════════════════════════════════════════════════
-
-let tlIdx = 0;
-let tlTimer = null;
-let tlRoutes = []; // sorted indices into _renderedActivities
-
-function tlGetSortedRoutes() {
-  // Get indices of rendered polylines sorted by activity date
-  return _renderedActivities
-    .map((a, i) => ({ i, date: a.date }))
-    .filter(x => x.date)
-    .sort((a, b) => a.date - b.date)
-    .map(x => x.i);
-}
-
-function tlUpdateUI(step) {
-  const bar   = document.getElementById('tl-progress-bar');
-  const label = document.getElementById('tl-date-label');
-  const count = document.getElementById('tl-count-label');
-  if (!bar) return;
-
-  const pct = tlRoutes.length > 1 ? (step / (tlRoutes.length - 1)) * 100 : 100;
-  bar.style.width = `${pct}%`;
-
-  const idx = tlRoutes[step];
-  const act = _renderedActivities[idx];
-  if (act && label) {
-    label.textContent = act.date
-      ? act.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-      : '';
-  }
-  if (count) count.textContent = `${step + 1} / ${tlRoutes.length}`;
-}
-
-function tlStep() {
-  if (tlIdx >= tlRoutes.length) {
-    tlStop();
-    return;
-  }
-
-  const idx  = tlRoutes[tlIdx];
-  const poly = _renderedPolylines[idx];
-  const act  = _renderedActivities[idx];
-  if (!poly || !act) { tlIdx++; tlStep(); return; }
-
-  const color = styleColor(act, _darkMode);
-
-  // Flash in bright, then settle to normal visible opacity
-  poly.setStyle({ color: '#ffffff', weight: 4, opacity: 1 });
-  setTimeout(() => {
-    poly.setStyle({ color, ...routeStyle(_darkMode, act) });
-  }, 300);
-
-  tlUpdateUI(tlIdx);
-  tlIdx++;
-
-  const speed = parseInt(document.getElementById('tl-speed')?.value || '3', 10);
-  const delay = Math.max(40, 500 / speed);
-  tlTimer = setTimeout(tlStep, delay);
-}
-
-function tlPrepare() {
-  if (_renderedActivities.length === 0) {
-    showToast('Load activities with routes first');
-    return false;
-  }
-
-  clearRouteSelection();
-  tlRoutes = tlGetSortedRoutes();
-  if (tlRoutes.length === 0) {
-    showToast('No routable activities to animate');
-    return false;
-  }
-
-  // Hide all routes — they will appear one by one as the animation plays
-  for (let i = 0; i < _renderedPolylines.length; i++) {
-    _renderedPolylines[i]?.setStyle({ opacity: 0, weight: 2 });
-  }
-
-  tlIdx = 0;
-  tlUpdateUI(0);
-  return true;
-}
-
-export function tlPlay() {
-  if (tlTimer) return; // already playing
-
-  const btn = document.getElementById('tl-play-btn');
-
-  if (tlIdx === 0 || tlIdx >= tlRoutes.length) {
-    if (!tlPrepare()) return;
-  }
-
-  if (btn) btn.innerHTML = '&#9646;&#9646; Pause';
-  tlStep();
-}
-
-export function tlPause() {
-  clearTimeout(tlTimer);
-  tlTimer = null;
-  const btn = document.getElementById('tl-play-btn');
-  if (btn) btn.innerHTML = '&#9654; Play';
-}
-
-export function tlStop() {
-  clearTimeout(tlTimer);
-  tlTimer = null;
-  tlIdx = 0;
-  tlRoutes = [];
-
-  const btn = document.getElementById('tl-play-btn');
-  if (btn) btn.innerHTML = '&#9654; Play';
-
-  const bar = document.getElementById('tl-progress-bar');
-  if (bar) bar.style.width = '0%';
-
-  const label = document.getElementById('tl-date-label');
-  if (label) label.textContent = 'Press Play to animate routes chronologically';
-
-  const count = document.getElementById('tl-count-label');
-  if (count) count.textContent = '';
-
-  // Restore normal opacity
-  for (let i = 0; i < _renderedPolylines.length; i++) {
-    const act = _renderedActivities[i];
-    if (!act) continue;
-    _renderedPolylines[i]?.setStyle({ color: styleColor(act, _darkMode), ...routeStyle(_darkMode, act) });
-  }
-}
-
-function tlToggle() {
-  if (tlTimer) {
-    tlPause();
+  // Restore a previous visit, or ask for data.
+  const restored = await restoreSaved();
+  if (restored) {
+    restoreMode(state.has);
+    buildChrome();
+    updatePhotosBadge();
+    showMergeBanner();
+    const { view } = parseHash();
+    await onRoute({ view: view || getMode().landing, param: parseHash().param });
+    saveRoutesInBackground();
   } else {
-    tlPlay();
+    syncWelcome();
+    openUpload();
   }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// MOST VISITED LOCATIONS
-// ═════════════════════════════════════════════════════════════════════════════
-
-const _geocodeCache = new Map();
-
-async function reverseGeocode(lat, lng) {
-  const key = `${lat},${lng}`;
-  if (_geocodeCache.has(key)) return _geocodeCache.get(key);
-
-  try {
-    // zoom=7 gives region/county level without pinning to a specific town or township
-    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=7`;
-    const res  = await fetch(url, { headers: { 'Accept-Language': 'en' } });
-    if (!res.ok) throw new Error('nominatim error');
-    const data = await res.json();
-    const addr = data.address || {};
-
-    // Build "Region, State" — skip county/township, prefer state_district or just state
-    const region = addr.state_district || addr.region || null;
-    const state  = addr.state || addr.province || null;
-    const country = addr.country_code?.toUpperCase();
-
-    let name;
-    if (region && state && region !== state) {
-      name = `${region}, ${state}`;
-    } else if (state) {
-      name = country === 'US' ? state : `${state}, ${country}`;
-    } else {
-      name = addr.country || `${lat.toFixed(1)}°, ${lng.toFixed(1)}°`;
-    }
-
-    _geocodeCache.set(key, name);
-    return name;
-  } catch {
-    const name = `${lat.toFixed(1)}°, ${lng.toFixed(1)}°`;
-    _geocodeCache.set(key, name);
-    return name;
-  }
-}
-
-async function computeTopLocations(activities, limit = 10) {
-  const counts = new Map();
-  const centers = new Map();
-
-  for (const act of activities) {
-    const pts = act.route_points;
-    if (!pts || pts.length === 0) continue;
-    const p = pts.find(x => x.lat !== null && x.lng !== null);
-    if (!p) continue;
-
-    // Cluster on a 2° grid (~220km) — wide enough to keep a metro region together.
-    const cellLat = Math.round(p.lat * 0.5) / 0.5;
-    const cellLng = Math.round(p.lng * 0.5) / 0.5;
-    const key = `${cellLat},${cellLng}`;
-
-    counts.set(key, (counts.get(key) || 0) + 1);
-    // Represent the cell with a real activity point, not the rounded cell corner:
-    // the corner can sit >120km from anything the user actually did, which both
-    // reverse-geocodes to the wrong region near borders/coastlines and makes
-    // click-to-zoom (setView at z11, below) land on empty ground.
-    if (!centers.has(key)) centers.set(key, { lat: p.lat, lng: p.lng });
-  }
-
-  if (counts.size === 0) return [];
-
-  const sorted = [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, limit);
-
-  // Reverse geocode in parallel (with a small delay between to be polite)
-  const results = [];
-  for (const [key, count] of sorted) {
-    const { lat, lng } = centers.get(key);
-    const name = await reverseGeocode(lat, lng);
-    results.push({ key, name, count, lat, lng });
-    await new Promise(r => setTimeout(r, 100)); // 100ms between Nominatim calls
-  }
-
-  return results;
-}
-
-async function renderLocationsPanel() {
-  const container = document.getElementById('locations-list');
-  if (!container) return;
-
-  // Use heatmap-rendered activities — these are the ones with route_points loaded
-  const routable = _renderedActivities.filter(a => a.route_points && a.route_points.length > 0);
-  if (routable.length === 0) {
-    container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">No GPS routes loaded yet.</div>';
-    return;
-  }
-
-  container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">Computing locations…</div>';
-
-  const locs = await computeTopLocations(routable, 10);
-  if (locs.length === 0) {
-    container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">No location data</div>';
-    return;
-  }
-
-  const maxCount = locs[0].count;
-
-  container.innerHTML = locs.map((loc, i) => `
-    <div class="loc-row" data-lat="${loc.lat}" data-lng="${loc.lng}" title="Click to zoom map here">
-      <div class="loc-rank">${i + 1}</div>
-      <div class="loc-info">
-        <div class="loc-name">${escapeHtml(loc.name)}</div>
-        <div class="loc-bar-wrap">
-          <div class="loc-bar" style="width:${Math.round((loc.count / maxCount) * 100)}%"></div>
-        </div>
-      </div>
-      <div class="loc-count">${loc.count}</div>
-      <div class="loc-zoom">&#8599;</div>
-    </div>
-  `).join('');
-
-  // Click to zoom map to that location
-  container.querySelectorAll('.loc-row').forEach(row => {
-    row.addEventListener('click', () => {
-      const lat = parseFloat(row.dataset.lat);
-      const lng = parseFloat(row.dataset.lng);
-      if (!isNaN(lat) && !isNaN(lng)) {
-        if (heatmapInstance) {
-          heatmapInstance.setView([lat, lng], 11, { animate: true });
-        }
-        // Scroll so the map is visible
-        document.getElementById('heatmap-container')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    });
-  });
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// DARK / LIGHT MODE
-// ═════════════════════════════════════════════════════════════════════════════
-
-// Respect the user's OS-level preference on first visit; an explicit
-// toggle (persisted below) always wins after that.
-const _storedTheme = localStorage.getItem('fitness-theme');
-let _darkMode = _storedTheme
-  ? _storedTheme === 'dark'
-  : (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-
-function applyTheme() {
-  document.documentElement.classList.toggle('dark-mode', _darkMode);
-  const label = _darkMode ? '☀ Light' : '🌙 Dark';
-  document.querySelectorAll('#btn-theme-toggle, #btn-theme-toggle-upload').forEach(btn => {
-    if (btn) btn.textContent = label;
-  });
-}
-
-function toggleTheme() {
-  _darkMode = !_darkMode;
-  localStorage.setItem('fitness-theme', _darkMode ? 'dark' : 'light');
-  applyTheme();
-  setHeatmapTheme(_darkMode);
-  renderMapLegend();
-}
+});

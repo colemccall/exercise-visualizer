@@ -4,6 +4,7 @@
  * Shows longest, fastest, most elevation, longest streak, etc.
  */
 
+import { escapeHtml } from '../core/util.js';
 import { TYPE_COLORS } from '../design-system/activity-colors.js';
 
 /**
@@ -111,11 +112,6 @@ export function renderRecords(activities, container, units = 'metric', onSelect)
   }
 }
 
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[c]));
-}
 
 function longestStreak(activities) {
   const days = new Set(activities.filter(a => a.date).map(a => {
