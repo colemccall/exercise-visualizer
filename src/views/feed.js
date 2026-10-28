@@ -9,7 +9,7 @@
  * middle-click-friendly (the old activity rows were clickable <div>s).
  */
 
-import { state, filtered, scoped, emit, dataAnchor } from '../core/state.js';
+import { state, filtered, scoped, emit, dataAnchor, isFiltered, describeFilters, clearFilter, clearFilters } from '../core/state.js';
 import { getMode } from '../core/modes.js';
 import { hrefFor } from '../core/router.js';
 import { escapeHtml, debounce } from '../core/lib/util.js';
@@ -144,6 +144,7 @@ function build(root) {
       <input type="search" id="feed-search" placeholder="Search activities…" autocomplete="off" />
       <div class="chips" id="feed-chips" role="group" aria-label="Filter by type"></div>
     </div>
+    <div class="active-filters" id="feed-active" aria-live="polite"></div>
     <div class="feed-layout">
       <div class="feed-main" id="feed-list"></div>
       <aside class="feed-side" id="feed-side" aria-label="Summary"></aside>
@@ -160,7 +161,9 @@ function build(root) {
     const chip = e.target.closest('[data-chip]');
     if (chip) { state.filters.type = chip.dataset.chip; shown = PAGE; emit('filters'); }
     if (e.target.closest('#feed-more')) { shown += PAGE; renderFeed(); }
-    if (e.target.closest('#feed-clear')) { Object.assign(state.filters, { type: 'All', search: '', month: null }); emit('filters'); }
+    const rm = e.target.closest('[data-remove-filter]');
+    if (rm) { clearFilter(rm.dataset.removeFilter); shown = PAGE; emit('filters'); }
+    if (e.target.closest('#feed-clear') || e.target.closest('#feed-clear-all')) { clearFilters(); shown = PAGE; emit('filters'); }
   });
   built = true;
 }
@@ -188,6 +191,13 @@ export function renderFeed() {
   const types = ['All', ...['Run', 'Ride', 'Walk', 'Hike', 'Swim', 'Other'].filter(t => all.some(a => a.type === t))];
   root.querySelector('#feed-chips').innerHTML = types.map(t => `
     <button type="button" class="chip" data-chip="${t}" aria-pressed="${state.filters.type === t}">${t}</button>`).join('');
+
+  // Every active filter is visible and removable, wherever it was set (Stats, Map…).
+  const active = describeFilters();
+  root.querySelector('#feed-active').innerHTML = isFiltered() ? `
+    <span class="af-label">Filtered:</span>
+    ${active.map(f => `<button type="button" class="chip removable" data-remove-filter="${f.key}" aria-label="Remove filter: ${escapeHtml(f.label)}">${escapeHtml(f.label)} <span aria-hidden="true">×</span></button>`).join('')}
+    <button type="button" class="chip ghost" id="feed-clear-all">Clear all</button>` : '';
 
   const listEl = root.querySelector('#feed-list');
   if (!list.length) {

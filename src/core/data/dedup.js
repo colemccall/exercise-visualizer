@@ -23,6 +23,10 @@
  *   Apple wins  : avg/max heart rate, calories_kcal, indoor, device
  *   Any field the winner lacks is filled from the other record.
  *
+ * Exact match first: when Strava writes a workout into Apple Health, Apple records
+ * its id as HKExternalUUID ("strava://activities/<id>"). Such a pair is merged on that id
+ * alone, whatever the clock skew or distance, before the heuristics above run.
+ *
  * Everything is reversible: overwritten fields are remembered in
  * `primary._premerge`, so re-running `mergeDuplicates()` after another upload
  * first undoes the previous merge and recomputes from scratch (idempotent).
@@ -36,6 +40,7 @@ const FILLABLE = [
   'name', 'distance_m', 'duration_s', 'moving_s', 'elevation_gain_m',
   'avg_heart_rate', 'max_heart_rate', 'calories_kcal', 'avg_cadence',
   'avg_watts', 'max_speed_mps', 'gear', 'indoor', 'description', 'device',
+  'relative_effort', 'elevation_loss_m', 'steps', 'avg_speed_mps', 'avg_mets', 'time_zone', 'weather',
 ];
 const ROUTE_FIELDS = ['has_route', 'gpx_file', '_gpxLoader', 'route_points'];
 
@@ -115,6 +120,16 @@ export function mergeDuplicates(activities) {
 
   // Candidate pairs: [primary, secondary, timeDiff]
   const candidates = [];
+
+  // Exact pass: Apple workouts that name their Strava activity. A negative time
+  // difference sorts these ahead of every heuristic pair.
+  const stravaById = new Map(sorted.filter(a => a.source === 'strava').map(a => [a.id, a]));
+  for (const a of sorted) {
+    const m = a.source === 'apple' && typeof a.external_id === 'string' ? /^strava:\/\/(?:activities\/)?(\d+)/.exec(a.external_id) : null;
+    const primary = m && stravaById.get(`strava-${m[1]}`);
+    if (primary) candidates.push([primary, a, -1]);
+  }
+
   for (let i = 0; i < sorted.length; i++) {
     for (let j = i + 1; j < sorted.length; j++) {
       if (sorted[j].date - sorted[i].date > MS_10_MIN) break;
@@ -150,6 +165,9 @@ function absorb(primary, secondary) {
   for (const field of FILLABLE) {
     const own = primary[field];
     const other = secondary[field];
+    // A workout Strava wrote into Apple Health carries "Strava" as its device; that is
+    // not the hardware that recorded it.
+    if (field === 'device' && /strava/i.test(String(other || ''))) continue;
     if (secondary.source === 'apple' && APPLE_WINS.includes(field)) {
       // Apple is authoritative for these whenever it has a value.
       if (!isMissing(field, other)) set(field, other);

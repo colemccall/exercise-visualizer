@@ -97,7 +97,7 @@ test('ActivitySummary: sorted ascending, empty days dropped, fields mapped', asy
   assert.deepEqual(summaries.map(s => s.date), ['2026-04-20', '2026-04-22']);
   assert.deepEqual(summaries[1], {
     date: '2026-04-22',
-    move_kcal: 512.4, move_goal: 500,
+    move_kcal: 512.4, move_goal: 500, move_unit: 'kcal',
     exercise_min: 45, exercise_goal: 30,
     stand_hours: 11, stand_goal: 12,
   });
@@ -148,4 +148,56 @@ test('ZIP with no export.xml returns empty results', async () => {
   } finally {
     console.warn = warn;
   }
+});
+
+const PAUSED = `<Workout workoutActivityType="HKWorkoutActivityTypeHiking" duration="46" durationUnit="min" sourceName="Test Watch" startDate="2026-04-25 10:00:00 -0400" endDate="2026-04-25 11:16:00 -0400">
+  <MetadataEntry key="HKIndoorWorkout" value="0"/>
+  <MetadataEntry key="HKWeatherTemperature" value="73 degF"/>
+  <MetadataEntry key="HKWeatherHumidity" value="5500 %"/>
+  <MetadataEntry key="HKAverageMETs" value="5.42 kcal/hr·kg"/>
+  <MetadataEntry key="HKTimeZone" value="America/Chicago"/>
+  <MetadataEntry key="HKExternalUUID" value="strava://18186496720"/>
+  <MetadataEntry key="HKWeatherTemperature" value="73 degF"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierStepCount" startDate="x" endDate="y" sum="4210" unit="count"/>
+  <WorkoutStatistics type="HKQuantityTypeIdentifierRunningPower" startDate="x" endDate="y" average="212.4" unit="W"/>
+ </Workout>`;
+
+test('duration is elapsed (start to end) and moving time is Apple active time', async () => {
+  const { activities } = await parseAppleExport(await zipOf(exportXml([PAUSED])));
+  const a = activities[0];
+  assert.equal(a.duration_s, 76 * 60, 'elapsed = end - start');
+  assert.equal(a.moving_s, 46 * 60, 'active time kept as moving time');
+});
+
+test('workouts with no pause keep duration == moving time', async () => {
+  const { activities } = await parseAppleExport(await zipOf(exportXml([RUN])));
+  assert.equal(activities[0].duration_s, 1800);
+  assert.equal(activities[0].moving_s, 1800);
+});
+
+test('weather, METs, time zone, external id, steps and running power are captured', async () => {
+  const { activities } = await parseAppleExport(await zipOf(exportXml([PAUSED])));
+  const a = activities[0];
+  assert.equal(a.weather.temp_c, 22.8);               // 73 F
+  assert.equal(a.weather.humidity_pct, 55);           // stored x100 in the export
+  assert.equal(a.avg_mets, 5.42);
+  assert.equal(a.time_zone, 'America/Chicago');
+  assert.equal(a.external_id, 'strava://18186496720');
+  assert.equal(a.steps, 4210);
+  assert.equal(a.avg_watts, 212);
+});
+
+test('a workout without these fields leaves them null', async () => {
+  const { activities } = await parseAppleExport(await zipOf(exportXml([YOGA])));
+  const a = activities[0];
+  assert.equal(a.weather, null); assert.equal(a.avg_mets, null); assert.equal(a.external_id, null); assert.equal(a.steps, null);
+});
+
+test('Move-minutes users: appleMoveTime fills the Move ring and is flagged as minutes', async () => {
+  const xml = exportXml([RUN], { summaries: ` <ActivitySummary dateComponents="2026-05-01" activeEnergyBurned="0" activeEnergyBurnedGoal="0" activeEnergyBurnedUnit="Cal" appleMoveTime="42" appleMoveTimeGoal="60" appleExerciseTime="30" appleExerciseTimeGoal="30" appleStandHours="9" appleStandHoursGoal="12"/>` });
+  const { summaries } = await parseAppleExport(await zipOf(xml));
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].move_kcal, 42);
+  assert.equal(summaries[0].move_goal, 60);
+  assert.equal(summaries[0].move_unit, 'min');
 });

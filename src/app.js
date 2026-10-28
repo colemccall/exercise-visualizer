@@ -26,6 +26,7 @@ import {
   setupUploadZones, parseStaged, restoreSaved, saveRoutesInBackground, deleteAllData,
   rematchPhotos, rebuildMerge,
 } from './core/data/upload.js';
+import { MODEL } from './core/data/store.js';
 import { icon, BRAND_MARK } from './components/icons.js';
 import { setHeatmapTheme } from './map/heatmap.js';
 import { renderPhotosList } from './photos/list.js';
@@ -419,6 +420,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const { view } = parseHash();
     await onRoute({ view: view || getMode().landing, param: parseHash().param });
     saveRoutesInBackground();
+    // Data saved by an older parser lacks weather, effort, steps and exact merging.
+    if (state.dataModel !== null && state.dataModel < MODEL && !safeStorage.get(`fitness-model-hint:${MODEL}`)) {
+      safeStorage.set(`fitness-model-hint:${MODEL}`, '1');
+      showToast('New details (weather, effort, steps) need a fresh import: re-upload your exports once from the ⋯ menu.', { duration: 10000 });
+    }
   } else {
     syncWelcome();
     openUpload();

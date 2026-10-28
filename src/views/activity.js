@@ -15,7 +15,7 @@ import { escapeHtml } from '../core/lib/util.js';
 import {
   getUnits, formatDistance, distanceParts, formatDuration, formatEffort, formatElevation,
   formatCalories, formatHR, formatPaceSecPerM, formatSpeedMps, formatSpeed, formatDateLong, formatTimeOfDay,
-  formatDate,
+  formatDate, formatTemp, formatWind,
 } from '../core/lib/format.js';
 import { ensureRoute, positioned } from '../core/data/routes.js';
 import { buildSeries, hasStream } from '../analysis/activity/streams.js';
@@ -64,11 +64,29 @@ function tilesFor(a) {
   if (a.max_heart_rate) tiles.push({ label: 'Max heart rate', value: String(Math.round(a.max_heart_rate)), unit: 'bpm', key: 'hrmax' });
   if (a.avg_cadence) tiles.push({ label: 'Avg cadence', value: String(Math.round(a.avg_cadence)), unit: 'rpm', key: 'cad' });
   if (a.avg_watts) tiles.push({ label: 'Avg power', value: String(Math.round(a.avg_watts)), unit: 'W', key: 'watts' });
+  if (a.relative_effort) tiles.push({ label: 'Relative effort', value: String(Math.round(a.relative_effort)), key: 'effort' });
+  if (a.steps) tiles.push({ label: 'Steps', value: Math.round(a.steps).toLocaleString(), key: 'steps' });
+  if (a.elevation_loss_m > 1) {
+    const e = formatElevation(a.elevation_loss_m).split(' ');
+    tiles.push({ label: 'Elevation loss', value: e[0], unit: e[1], key: 'loss' });
+  }
+  if (a.avg_mets) tiles.push({ label: 'Avg intensity', value: a.avg_mets.toFixed(1), unit: 'METs', key: 'mets' });
   if (a.max_speed_mps) {
     const s = formatSpeedMps(a.max_speed_mps).split(' ');
     tiles.push({ label: 'Max speed', value: s[0], unit: s[1], key: 'maxspeed' });
   }
   return tiles;
+}
+
+/** "73°F · 55% humidity · 6 mph wind", when the source recorded weather. */
+function weatherLine(a) {
+  const w = a.weather;
+  if (!w || w.temp_c === null || w.temp_c === undefined) return '';
+  const parts = [formatTemp(w.temp_c)];
+  if (w.feels_c !== null && w.feels_c !== undefined && Math.abs(w.feels_c - w.temp_c) >= 2) parts[0] += ` (feels ${formatTemp(w.feels_c)})`;
+  if (w.humidity_pct !== null && w.humidity_pct !== undefined) parts.push(`${w.humidity_pct}% humidity`);
+  if (w.wind_mps) parts.push(`${formatWind(w.wind_mps)} wind`);
+  return `<p class="act-weather"><span aria-hidden="true">☁</span> ${escapeHtml(parts.join(' · '))}</p>`;
 }
 
 function sourceNote(a) {
@@ -196,6 +214,7 @@ export async function renderActivity(id) {
       </div>
     </header>
 
+    ${weatherLine(a)}
     ${a.description ? `<p class="act-desc">${escapeHtml(a.description)}</p>` : ''}
 
     <div class="act-grid">

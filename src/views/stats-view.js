@@ -5,7 +5,7 @@
  * currently in view, so the filters drive every number.
  */
 
-import { state, scoped, filtered, emit, clearFilters } from '../core/state.js';
+import { state, scoped, filtered, emit, clearFilters, describeFilters } from '../core/state.js';
 import { escapeHtml, debounce, parseDateInput, safeStorage, MONTH_NAMES } from '../core/lib/util.js';
 import {
   getUnits, formatters, formatDistance, formatMovingTime, formatElevation, formatPace,
@@ -56,14 +56,7 @@ function updateStatsBar(list) {
 function updateFiltersSummary(list) {
   const el = document.getElementById('filters-summary');
   if (!el) return;
-  const f = state.filters;
-  const parts = [];
-  if (f.type !== 'All') parts.push(f.type);
-  if (f.search) parts.push(`“${f.search}”`);
-  if (f.month) { const [y, m] = f.month.split('-'); parts.push(`${MONTH_NAMES[+m]} ${y}`); }
-  if (f.from) parts.push(`from ${f.from.toLocaleDateString('en-US')}`);
-  if (f.to) parts.push(`to ${f.to.toLocaleDateString('en-US')}`);
-  if (f.duplicatesOnly) parts.push('merged workouts only');
+  const parts = describeFilters().map(f => f.label);
   const total = scoped().length;
   el.textContent = parts.length
     ? `${parts.join(' · ')} — ${list.length.toLocaleString()} of ${total.toLocaleString()} activities`

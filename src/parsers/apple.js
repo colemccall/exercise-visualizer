@@ -226,10 +226,19 @@ function parseSummaryTag(tag) {
   if (!date) return null;
 
   const unit = attr('activeEnergyBurnedUnit');
+  let move = toKcal(num('activeEnergyBurned'), unit);
+  let moveGoal = toKcal(num('activeEnergyBurnedGoal'), unit);
+  // Some users (e.g. Move Minutes mode) have no calorie Move ring: Apple then fills
+  // appleMoveTime instead. Keep it, and flag the unit so the UI labels it "min".
+  let move_unit = 'kcal';
+  if (!move && !moveGoal && (num('appleMoveTime') || num('appleMoveTimeGoal'))) {
+    move = num('appleMoveTime'); moveGoal = num('appleMoveTimeGoal'); move_unit = 'min';
+  }
   const summary = {
     date: date.slice(0, 10),
-    move_kcal: toKcal(num('activeEnergyBurned'), unit),
-    move_goal: toKcal(num('activeEnergyBurnedGoal'), unit),
+    move_kcal: move,
+    move_goal: moveGoal,
+    move_unit,
     exercise_min: num('appleExerciseTime'),
     exercise_goal: num('appleExerciseTimeGoal'),
     stand_hours: num('appleStandHours'),
@@ -280,7 +289,13 @@ function parseWorkoutXml(workoutXml, index) {
   const date = new Date(startStr);
   if (isNaN(date.getTime())) return null;
 
-  const duration_s = toSeconds(parseFloat(attr('duration') || '0') || 0, attr('durationUnit'));
+  // Apple's `duration` is *active* time (pauses excluded); start→end is elapsed time.
+  // Strava's duration is elapsed, so use the same meaning here and keep the active
+  // figure as moving time. (61 of 402 workouts in a real export differ by >2 min.)
+  const active_s = toSeconds(parseFloat(attr('duration') || '0') || 0, attr('durationUnit'));
+  const endDate = new Date(attr('endDate') || '');
+  const spanned_s = isNaN(endDate.getTime()) ? 0 : (endDate - date) / 1000;
+  const duration_s = spanned_s >= active_s && spanned_s > 0 ? spanned_s : active_s;
 
   // Distance is in a child WorkoutStatistics element (iOS 16+: the type is
   // DistanceWalkingRunning / DistanceCycling / DistanceSwimming…), or in the
@@ -326,6 +341,34 @@ function parseWorkoutXml(workoutXml, index) {
   const indoorMatch = workoutXml.match(/key="HKIndoorWorkout"\s+value="([^"]*)"/);
   const indoor = indoorMatch ? indoorMatch[1] === '1' : null;
 
+  // Other metadata worth keeping. Every MetadataEntry appears twice per workout in
+  // a real export, so the first match is enough.
+  const meta = (key) => {
+    const mm = workoutXml.match(new RegExp(`key="${key}"\\s+value="([^"]*)"`));
+    return mm ? mm[1] : null;
+  };
+  let weather = null;
+  const tempRaw = meta('HKWeatherTemperature');            // "73 degF"
+  if (tempRaw) {
+    const [tv, tu = 'degF'] = tempRaw.trim().split(/\s+/);
+    const t = parseFloat(tv);
+    if (!isNaN(t)) {
+      const hum = parseFloat((meta('HKWeatherHumidity') || '').trim());   // stored x100: "5500 %" = 55%
+      weather = {
+        temp_c: Math.round((/f/i.test(tu) ? (t - 32) * 5 / 9 : t) * 10) / 10,
+        feels_c: null,
+        humidity_pct: isNaN(hum) ? null : Math.round(hum > 100 ? hum / 100 : hum),
+        wind_mps: null,
+      };
+    }
+  }
+  const metsRaw = parseFloat((meta('HKAverageMETs') || '').trim());
+  const avg_mets = isNaN(metsRaw) || metsRaw <= 0 ? null : Math.round(metsRaw * 100) / 100;
+  const time_zone = meta('HKTimeZone');
+  const external_id = meta('HKExternalUUID');
+  const stepsVal = parseFloat(tagAttr(statsTag(workoutXml, 'HKQuantityTypeIdentifierStepCount'), 'sum'));
+  const powerVal = parseFloat(tagAttr(statsTag(workoutXml, 'HKQuantityTypeIdentifierRunningPower'), 'average'));
+
   // Route file reference — inside <WorkoutRoute> as <FileReference path="..."/>
   const routeFileMatch = workoutXml.match(/<FileReference\b[^>]*path="([^"]*)"/);
   const gpx_file = routeFileMatch ? routeFileMatch[1] : null;
@@ -343,12 +386,15 @@ function parseWorkoutXml(workoutXml, index) {
     date,
     distance_m,
     duration_s: Math.round(duration_s),
-    moving_s: Math.round(duration_s),
+    moving_s: Math.round(active_s),
     elevation_gain_m: elevation_gain_m && !isNaN(elevation_gain_m) ? elevation_gain_m : null,
     avg_heart_rate: avgHR > 0 ? avgHR : null,
     max_heart_rate: maxHR > 0 ? maxHR : null,
     calories_kcal,
     indoor,
+    steps: !isNaN(stepsVal) && stepsVal > 0 ? Math.round(stepsVal) : null,
+    avg_watts: !isNaN(powerVal) && powerVal > 0 ? Math.round(powerVal) : null,
+    avg_mets, time_zone, external_id, weather,
     device: attr('sourceName'),
     has_route: !!gpx_file,
     gpx_file,

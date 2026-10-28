@@ -7,6 +7,11 @@
  *   moving_s, calories_kcal, avg_cadence, avg_watts, max_speed_mps, gear,
  *   sub_type (always set), indoor, description, device,
  *   sources, merged_into, merged_ids   (maintained by core/dedup.js)
+ *
+ * v2.1 adds (additive, nullable): relative_effort (Strava), elevation_loss_m, steps,
+ *   avg_speed_mps, avg_mets (Apple), time_zone (IANA name), external_id (Apple's link
+ *   to the Strava activity it wrote, "strava://<id>"), and
+ *   weather: {temp_c, feels_c, humidity_pct, wind_mps} | null.
  */
 
 /**
@@ -35,6 +40,14 @@ export function createActivity(fields) {
     indoor: null,
     description: null,
     device: null,
+    relative_effort: null,
+    elevation_loss_m: null,
+    steps: null,
+    avg_speed_mps: null,
+    avg_mets: null,
+    time_zone: null,
+    external_id: null,
+    weather: null,
     has_route: false,
     gpx_file: null,
     route_points: null,

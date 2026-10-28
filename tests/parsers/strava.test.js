@@ -144,3 +144,21 @@ test('standalone .gpx upload becomes one activity with sensor averages', async (
   assert.equal(a.avg_watts, 160);
   assert.equal(a.avg_heart_rate, 110);
 });
+
+test('v2.1 fields: relative effort, elevation loss, steps, average speed, weather', async () => {
+  const headers = [...STRAVA_HEADERS, 'Relative Effort', 'Elevation Loss', 'Total Steps', 'Average Speed', 'Weather Condition', 'Weather Temperature', 'Apparent Temperature', 'Humidity', 'Wind Speed'];
+  const row = [...stravaRow({ id: 9, date: 'Apr 22, 2026, 3:14:03 AM', type: 'Walk' }), '6', '14.5', '3866.0', '1.294', '2.0', '17.6', '17.8', '0.87', '1.3'];
+  const zip = await makeZip({ 'activities.csv': csv(headers, [row]) }, 'x.zip');
+  const [a] = await parse(zip);
+  assert.equal(a.relative_effort, 6);
+  assert.equal(a.elevation_loss_m, 14.5);
+  assert.equal(a.steps, 3866);
+  assert.equal(a.avg_speed_mps, 1.294);
+  assert.deepEqual(a.weather, { temp_c: 17.6, feels_c: 17.8, humidity_pct: 87, wind_mps: 1.3 });
+});
+
+test('rows without weather or the new columns get nulls', async () => {
+  const zip = await makeZip({ 'activities.csv': csv(STRAVA_HEADERS, [stravaRow({ id: 10, date: 'Apr 22, 2026, 3:14:03 AM' })]) }, 'x.zip');
+  const [a] = await parse(zip);
+  assert.equal(a.weather, null); assert.equal(a.relative_effort, null); assert.equal(a.steps, null);
+});

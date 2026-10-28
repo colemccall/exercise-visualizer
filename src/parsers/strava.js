@@ -346,6 +346,17 @@ function rowToActivity(row) {
   const avgHR = Math.round(parseFloat(row['Average Heart Rate'] || row['average_heartrate'] || ''));
   const maxHR = Math.round(parseFloat(row['Max Heart Rate'] || row['max_heartrate'] || ''));
 
+  // Weather (only present on some rows): temperature °C, humidity as a 0-1 fraction,
+  // wind m/s. "Weather Condition" is an opaque numeric code in the export, so it is
+  // deliberately not interpreted.
+  const temp = num(row['Weather Temperature']);
+  const weather = temp === null ? null : {
+    temp_c: temp,
+    feels_c: num(row['Apparent Temperature']),
+    humidity_pct: num(row['Humidity']) === null ? null : Math.round(num(row['Humidity']) * 100),
+    wind_mps: num(row['Wind Speed']),
+  };
+
   return createActivity({
     id: `strava-${id}`,
     source: 'strava',
@@ -365,6 +376,12 @@ function rowToActivity(row) {
     max_speed_mps: positive(row['Max Speed']),
     gear: row['Activity Gear'] || row['Gear'] || row['Bike'] || null,
     description: row['Activity Description'] || null,
+    // The export repeats some columns; the first copy is the short form, so prefer it.
+    relative_effort: positive(row['Relative Effort']) ?? positive(row['Relative Effort#2']),
+    elevation_loss_m: positive(row['Elevation Loss']),
+    steps: positive(row['Total Steps']),
+    avg_speed_mps: positive(row['Average Speed']),
+    weather,
   });
 }
 

@@ -111,6 +111,17 @@ export const distanceUnitLabel = () => (units === 'imperial' ? 'mi' : 'km');
 export const elevationUnitLabel = () => (units === 'imperial' ? 'ft' : 'm');
 
 export const formatCalories = kcal => (kcal === null || kcal === undefined ? '—' : `${Math.round(kcal).toLocaleString()} kcal`);
+/** Temperature given in °C, shown in the user's units. */
+export function formatTemp(celsius) {
+  if (celsius === null || celsius === undefined || Number.isNaN(celsius)) return '—';
+  return units === 'imperial' ? `${Math.round(celsius * 9 / 5 + 32)}°F` : `${Math.round(celsius)}°C`;
+}
+/** Wind given in m/s. */
+export function formatWind(mps) {
+  if (!mps) return '—';
+  return units === 'imperial' ? `${(mps * 2.23694).toFixed(0)} mph` : `${(mps * 3.6).toFixed(0)} km/h`;
+}
+
 export const formatHR = bpm => (bpm ? `${Math.round(bpm)} bpm` : '—');
 
 export function formatDate(date, opts = { month: 'short', day: 'numeric', year: 'numeric' }) {

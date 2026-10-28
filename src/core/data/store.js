@@ -21,7 +21,9 @@
 
 const DB_NAME = 'fitness-visualizer';
 const DB_VERSION = 1;
-const SCHEMA = 2; // bump when the activity model changes shape; older data is discarded
+const SCHEMA = 2;
+/** Bumped when parsers start capturing more fields; saved data from an older parser still loads but lacks them. */
+export const MODEL = 3; // bump when the activity model changes shape; older data is discarded
 
 let dbPromise = null;
 
@@ -131,7 +133,7 @@ export async function saveSource(source, activities) {
     const existing = await done(store.getAll());
     for (const rec of existing) if (rec.source === source) store.delete(rec.id);
     for (const a of activities) store.put(serializeActivity(a));
-    tx.objectStore('meta').put({ key: 'state', schema: SCHEMA, saved: Date.now() });
+    tx.objectStore('meta').put({ key: 'state', schema: SCHEMA, model: MODEL, saved: Date.now() });
     await txDone(tx);
     return true;
   } catch (e) { console.warn('store.saveSource failed', e); return false; }
@@ -150,7 +152,7 @@ export async function saveSummaries(summaries) {
   } catch (e) { console.warn('store.saveSummaries failed', e); return false; }
 }
 
-/** @returns {Promise<{activities: object[], summaries: object[]}>} activities are revived, loaders attached */
+/** @returns {Promise<{activities: object[], summaries: object[], model: number}>} activities are revived, loaders attached */
 export async function loadAll() {
   const db = await openDb();
   if (!db) return { activities: [], summaries: [] };
@@ -165,7 +167,7 @@ export async function loadAll() {
     const activities = recs.map(reviveActivity);
     for (const a of activities) attachRouteLoader(a);
     summaries.sort((x, y) => (x.date < y.date ? -1 : 1));
-    return { activities, summaries };
+    return { activities, summaries, model: meta.model || 2 };
   } catch (e) { console.warn('store.loadAll failed', e); return { activities: [], summaries: [] }; }
 }
 

@@ -2,7 +2,7 @@
 // Summary: {date:'YYYY-MM-DD', move_kcal, move_goal, exercise_min, exercise_goal,
 //           stand_hours, stand_goal}. A day with no summary counts as not closed.
 
-import { addDays, daysInMonth, consecutiveRuns, longestRun, dayKey } from '../dates.js';
+import { addDays, daysBetween, daysInMonth, consecutiveRuns, longestRun, dayKey, parseKey, weekStartKey } from '../dates.js';
 
 const ring = (value, goal) => {
   const v = Number.isFinite(value) ? value : 0;
@@ -72,7 +72,10 @@ export function ringStreaks(summaries, { today } = {}) {
 
 /**
  * Calendar data for one month (month is 1-12): one entry per day,
- *   {day, date, move, exercise, stand (pct, 1 = closed; null with no summary), all_closed}
+ *   {day, date, has_data, move, exercise, stand, all_closed}
+ * where move/exercise/stand are full ring objects {value, goal, pct, closed} (as
+ * ringsForDay) or null when that day has no summary. A day that has a summary but
+ * zero progress is an *open ring*, not missing data.
  */
 export function monthRings(summaries, year, month) {
   const idx = indexSummaries(summaries);
@@ -83,9 +86,9 @@ export function monthRings(summaries, year, month) {
     const s = idx.get(date);
     const r = s ? dayRings(s) : null;
     out.push({
-      day, date,
-      move: r ? r.move.pct : null, exercise: r ? r.exercise.pct : null,
-      stand: r ? r.stand.pct : null, all_closed: r ? r.all_closed : false,
+      day, date, has_data: !!r,
+      move: r ? r.move : null, exercise: r ? r.exercise : null, stand: r ? r.stand : null,
+      all_closed: r ? r.all_closed : false,
     });
   }
   return out;
@@ -112,6 +115,87 @@ export function weeklyRingTotals(summaries, weekStart) {
     if (r.all_closed) out.closed.all++;
   }
   return out;
+}
+
+const RING_KEYS = ['move', 'exercise', 'stand'];
+const FIELD = { move: 'move_kcal', exercise: 'exercise_min', stand: 'stand_hours' };
+
+/**
+ * Cumulative rings: add up every day in [fromKey, toKey] instead of looking at one day.
+ *
+ *   -> { from, to, days_in_period, days_with_data, all_closed_days,
+ *        move|exercise|stand: { value,       Σ progress over every day with data
+ *                               goal,        Σ of the *per-day* goals (goals change over time)
+ *                               pct,         Σ progress ÷ Σ goal, on days that had a goal
+ *                               closed,      pct >= 1
+ *                               closed_days, days this ring closed
+ *                               goal_days,   days that had a goal set
+ *                               has_goal } }
+ *
+ * Rules (verified against a real export whose goals changed four times, and whose
+ * Exercise/Stand goals were 0 until mid-2025):
+ *  - goals are summed per day, never "today's goal x number of days";
+ *  - days with no goal for a ring are left out of that ring's goal *and* of the
+ *    progress used for pct (otherwise a no-goal stretch would read as >100%), but
+ *    still count toward `value`;
+ *  - a day with a summary and zero progress counts (an open ring); a day with no
+ *    summary adds nothing and shows up in days_with_data / days_in_period;
+ *  - callers cap `toKey` at the last data day for a period still in progress.
+ */
+export function periodRingTotals(summaries, fromKey, toKey) {
+  const out = {
+    from: fromKey, to: toKey,
+    days_in_period: toKey < fromKey ? 0 : daysBetween(fromKey, toKey) + 1,
+    days_with_data: 0, all_closed_days: 0,
+  };
+  for (const k of RING_KEYS) out[k] = { value: 0, goal: 0, pct: 0, closed: false, closed_days: 0, goal_days: 0, has_goal: false, _goalValue: 0 };
+
+  for (const s of summaries || []) {
+    if (s.date < fromKey || s.date > toKey) continue;
+    out.days_with_data++;
+    const d = dayRings(s);
+    for (const k of RING_KEYS) {
+      const t = out[k], r = d[k];
+      t.value += r.value;
+      if (r.goal > 0) { t.goal += r.goal; t._goalValue += r.value; t.goal_days++; }
+      if (r.closed) t.closed_days++;
+    }
+    if (d.all_closed) out.all_closed_days++;
+  }
+  for (const k of RING_KEYS) {
+    const t = out[k];
+    t.has_goal = t.goal > 0;
+    t.pct = t.goal > 0 ? t._goalValue / t.goal : 0;
+    t.closed = t.goal > 0 && t.pct >= 1;
+    delete t._goalValue;
+  }
+  return out;
+}
+
+/**
+ * Bounds of the week / month / year containing `key`, with the end capped at `lastKey`
+ * (the newest day we have data for) so a period still in progress is measured only
+ * over days that have happened.
+ *   -> {from, to, full_to, label_kind, capped}
+ */
+export function periodBounds(kind, key, lastKey) {
+  const { y, m } = parseKey(key);
+  let from, fullTo;
+  if (kind === 'week') { from = weekStartKey(key); fullTo = addDays(from, 6); }
+  else if (kind === 'month') { from = `${y}-${String(m).padStart(2, '0')}-01`; fullTo = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth(y, m)).padStart(2, '0')}`; }
+  else { from = `${y}-01-01`; fullTo = `${y}-12-31`; }
+  const to = lastKey && lastKey < fullTo ? lastKey : fullTo;
+  return { from, to, full_to: fullTo, capped: to < fullTo };
+}
+
+/** Per-month cumulative totals for a year: 12 entries (month 1-12). */
+export function yearMonthTotals(summaries, year) {
+  return Array.from({ length: 12 }, (_, i) => {
+    const m = i + 1;
+    const from = `${year}-${String(m).padStart(2, '0')}-01`;
+    const to = `${year}-${String(m).padStart(2, '0')}-${String(daysInMonth(year, m)).padStart(2, '0')}`;
+    return { month: m, ...periodRingTotals(summaries, from, to) };
+  });
 }
 
 export { dayKey };

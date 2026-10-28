@@ -203,10 +203,11 @@ export async function rematchPhotos() {
 /** Load whatever a previous visit saved. @returns {Promise<boolean>} true if data was restored */
 export async function restoreSaved() {
   if (!(await store.hasData())) return false;
-  const { activities, summaries } = await store.loadAll();
+  const { activities, summaries, model } = await store.loadAll();
   if (!activities.length && !summaries.length) return false;
   state.activities = activities;
   state.summaries = summaries;
+  state.dataModel = model;
   rebuildMerge();
   return true;
 }

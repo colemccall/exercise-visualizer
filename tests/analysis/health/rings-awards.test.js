@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ringsForDay, ringsRange, ringStreaks, monthRings, weeklyRingTotals } from '../../../src/analysis/health/rings.js';
+import { ringsForDay, ringsRange, ringStreaks, monthRings, weeklyRingTotals, periodRingTotals, periodBounds, yearMonthTotals } from '../../../src/analysis/health/rings.js';
+import { ringsSvg, ringsLabel } from '../../../src/components/ring.js';
 import { computeAwards, awardsByCategory } from '../../../src/analysis/health/awards.js';
 import { addDays } from '../../../src/analysis/dates.js';
 import { act } from '../_helpers.js';
@@ -43,7 +44,7 @@ test('monthRings and weeklyRingTotals', () => {
   assert.equal(m.length, 31);
   assert.equal(m[0].move, null);
   assert.equal(m[2].date, '2025-03-03');
-  assert.ok(m[2].all_closed && m[2].move === 1.2);
+  assert.ok(m[2].all_closed && m[2].move.pct === 1.2 && m[2].move.value === 600 && m[2].move.goal === 500);
   const w = weeklyRingTotals(s, '2025-03-03');
   assert.equal(w.closed.all, 7);
   assert.equal(w.move_kcal, 4200);
@@ -128,4 +129,76 @@ test('awards: ring awards from summaries', () => {
   assert.equal(by['rings-move-7'].earned.getDate(), 9);
   assert.equal(by['rings-perfect-month'].earned, null);
   assert.ok(Math.abs(by['rings-perfect-month'].progress - 7 / 31) < 1e-9);
+});
+
+test('monthRings output can actually be drawn (regression: it used to return bare numbers and every day rendered empty)', () => {
+  const s = [summary('2025-03-03', true)];
+  const day = monthRings(s, 2025, 3)[2];
+  const svg = ringsSvg(day, { size: 40 });
+  assert.equal((svg.match(/class="ring-arc/g) || []).length, 5, 'three first laps + second laps on Move (120%) and Exercise (117%)');
+  assert.match(ringsLabel(day), /Move 600 of 500/);
+});
+
+test('monthRings: a day with a summary but zero progress is an open ring, not missing data', () => {
+  const s = [summary('2025-03-05', false, { move_kcal: 0, exercise_min: 0, stand_hours: 0 })];
+  const day = monthRings(s, 2025, 3)[4];
+  assert.equal(day.has_data, true);
+  assert.equal(day.move.pct, 0);
+  assert.equal(day.move.goal, 500);
+  assert.equal(monthRings(s, 2025, 3)[5].has_data, false);
+});
+
+test('periodRingTotals sums every day, with per-day goals', () => {
+  // goals change mid-period: Move goal 400 for 3 days, then 1000 for 2 days
+  const s = [
+    ...days('2025-06-01', 3).map(d => ({ ...d, move_kcal: 500, move_goal: 400 })),
+    ...days('2025-06-04', 2).map(d => ({ ...d, move_kcal: 800, move_goal: 1000 })),
+  ];
+  const p = periodRingTotals(s, '2025-06-01', '2025-06-07');
+  assert.equal(p.days_in_period, 7);
+  assert.equal(p.days_with_data, 5);
+  assert.equal(p.move.value, 3100);                       // 3x500 + 2x800
+  assert.equal(p.move.goal, 3200);                        // 3x400 + 2x1000, NOT 1000 x 5 or 400 x 5
+  assert.ok(Math.abs(p.move.pct - 3100 / 3200) < 1e-9);
+  assert.equal(p.move.closed_days, 3);                    // the first three beat 400; 800 < 1000
+  assert.equal(p.all_closed_days, 3);
+});
+
+test('periodRingTotals: days with no goal do not inflate the percentage', () => {
+  // Exercise/Stand goals were 0 until mid-2025 in the real export
+  const noGoal = days('2025-05-01', 4).map(d => ({ ...d, exercise_min: 40, exercise_goal: 0, stand_hours: 10, stand_goal: 0 }));
+  const withGoal = days('2025-05-05', 2).map(d => ({ ...d, exercise_min: 15, exercise_goal: 30 }));
+  const p = periodRingTotals([...noGoal, ...withGoal], '2025-05-01', '2025-05-06');
+  assert.equal(p.exercise.value, 4 * 40 + 2 * 15);        // all progress still totalled
+  assert.equal(p.exercise.goal, 60);                      // only goal days
+  assert.equal(p.exercise.goal_days, 2);
+  assert.equal(p.exercise.pct, 0.5);                      // 30 / 60, not 190 / 60
+  const none = periodRingTotals(noGoal, '2025-05-01', '2025-05-04');
+  assert.equal(none.exercise.has_goal, false);
+  assert.equal(none.exercise.pct, 0);
+  assert.equal(none.exercise.closed, false);
+});
+
+test('periodRingTotals: missing days add nothing but are reported', () => {
+  const s = [summary('2025-03-03'), summary('2025-03-05')];
+  const p = periodRingTotals(s, '2025-03-03', '2025-03-09');
+  assert.equal(p.days_in_period, 7);
+  assert.equal(p.days_with_data, 2);
+  assert.equal(p.move.value, 1200);
+});
+
+test('periodBounds caps a period still in progress at the last data day', () => {
+  assert.deepEqual(periodBounds('week', '2026-04-21', '2026-04-21'), { from: '2026-04-20', to: '2026-04-21', full_to: '2026-04-26', capped: true });
+  const m = periodBounds('month', '2026-04-21', '2026-04-21');
+  assert.equal(m.from, '2026-04-01'); assert.equal(m.to, '2026-04-21'); assert.equal(m.full_to, '2026-04-30');
+  const y = periodBounds('year', '2025-06-10', '2026-04-21');
+  assert.equal(y.from, '2025-01-01'); assert.equal(y.to, '2025-12-31'); assert.equal(y.capped, false);
+  assert.equal(periodBounds('month', '2024-02-10', '2026-04-21').full_to, '2024-02-29');   // leap year
+});
+
+test('yearMonthTotals returns 12 months', () => {
+  const t = yearMonthTotals(days('2025-03-01', 31), 2025);
+  assert.equal(t.length, 12);
+  assert.equal(t[2].days_with_data, 31);
+  assert.equal(t[0].days_with_data, 0);
 });

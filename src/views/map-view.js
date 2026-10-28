@@ -8,7 +8,7 @@
  * detail page. Selection is a pointer at one activity, independent of filters.
  */
 
-import { state, scoped, filtered, emit } from '../core/state.js';
+import { state, scoped, filtered, emit, isFiltered } from '../core/state.js';
 import { navigate } from '../core/router.js';
 import { escapeHtml, MONTH_SHORT, safeStorage } from '../core/lib/util.js';
 import {
@@ -101,8 +101,7 @@ async function getInitialMapCenter() {
 function applyHeatmapFilter(list) {
   if (!_renderedPolylines.length) { renderMapLegend(); return; }
   const ids = new Set(list.map(a => a.id));
-  const f = state.filters;
-  const hasFilter = f.type !== 'All' || f.month || f.search || f.duplicatesOnly || f.from || f.to;
+  const hasFilter = isFiltered();
 
   for (let i = 0; i < _renderedPolylines.length; i++) {
     const act = _renderedActivities[i];

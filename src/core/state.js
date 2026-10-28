@@ -24,6 +24,8 @@ export const state = {
   has: { strava: false, apple: false },
   /** Leaflet map on the Map view. */
   heatmap: null,
+  /** Parser version that produced the saved data (see core/data/store.js MODEL). */
+  dataModel: null,
 };
 
 const listeners = new Map();
@@ -71,6 +73,32 @@ export const byId = (id) => state.activities.find(a => a.id === id) || null;
 /** Number of workouts that were recorded by both sources and merged. */
 export function mergedCount() {
   return state.activities.filter(a => !a.merged_into && a.sources && a.sources.length > 1).length;
+}
+
+/** Is any filter narrowing the list? (One definition; Feed, Stats and Map all read it.) */
+export function isFiltered(f = state.filters) {
+  return f.type !== 'All' || !!(f.from || f.to || f.search || f.duplicatesOnly || f.month);
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/** Active filters as removable chips: [{ key, label }] (key matches a state.filters field). */
+export function describeFilters(f = state.filters) {
+  const out = [];
+  const day = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  if (f.type !== 'All') out.push({ key: 'type', label: f.type });
+  if (f.search) out.push({ key: 'search', label: `“${f.search}”` });
+  if (f.month) { const [y, m] = f.month.split('-'); out.push({ key: 'month', label: `${MONTHS[+m]} ${y}` }); }
+  if (f.from) out.push({ key: 'from', label: `from ${day(f.from)}` });
+  if (f.to) out.push({ key: 'to', label: `to ${day(f.to)}` });
+  if (f.duplicatesOnly) out.push({ key: 'duplicatesOnly', label: 'merged workouts only' });
+  return out;
+}
+
+/** Reset one filter field to its empty value. */
+export function clearFilter(key) {
+  const empty = { type: 'All', search: '', month: null, from: null, to: null, duplicatesOnly: false };
+  if (key in empty) state.filters[key] = empty[key];
 }
 
 export function clearFilters() {

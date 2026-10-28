@@ -102,6 +102,13 @@ See README for the field list. Things that are easy to get wrong:
 
 - `duration_s` is *elapsed* time; `moving_s` is moving time (Strava Moving Time; Apple: same as duration).
   Show `moving_s || duration_s` and label it honestly.
+- Added in v2.1 (null until a fresh import): `relative_effort`, `elevation_loss_m`, `steps`, `avg_speed_mps`, `avg_mets`,
+  `time_zone`, `external_id`, `weather {temp_c, feels_c, humidity_pct, wind_mps}`. Strava's "Weather Condition" is an opaque
+  numeric code, so it is deliberately not interpreted. Saved data records which parser wrote it (`MODEL` in
+  `core/data/store.js`); older data triggers a one-time "re-upload" hint.
+- **Apple `duration_s` is elapsed (end − start); `moving_s` is Apple's active `duration`** (pauses excluded), matching Strava's meaning.
+- Apple writes `HKExternalUUID = strava://activities/<id>` on workouts that Strava put into Health; `core/data/dedup.js`
+  merges those on the id alone before the 10-minute heuristic.
 - `sources` is `['strava']`, `['apple']` or both after a merge. `merged_into` is set on the *secondary*
   record; everything user-facing must skip records with `merged_into` (`state.scoped()` does).
 - Route points are `{lat,lng,ele,time,hr,cad,watts}`; `route_points` is lazy — always go through
@@ -143,6 +150,16 @@ still loaded. `body[data-mode]` + `html.dark-mode` select one of six token sets 
 - Stats-style numbers must use `moving_s`, units must go through `src/core/lib/format.js`.
 - "Now" for trends / this-week is `dataAnchor()` — an export is a snapshot, so if the newest activity is
   >3 weeks old it anchors there instead of today (otherwise "last 90 days" is empty).
+
+## Rings (what the numbers mean)
+
+`analysis/health/rings.js`: `ringsForDay` for one day; `periodRingTotals(summaries, from, to)` for cumulative rings.
+Rules that matter (verified against a real export whose Move goal changed 290→1000 and whose Exercise/Stand goals were
+0 until mid-2025): goals are **summed per day**, never "today's goal × days"; days with no goal for a ring are left out of
+that ring's goal and of the progress used for the percentage (but still count toward the total); a day with a summary and
+zero progress is an **open ring**, a day without a summary adds nothing and is reported as missing; a period still in
+progress is capped at the newest data day (`periodBounds`). `monthRings` returns full ring objects (it once returned bare
+percentages, which rendered every day empty). Streaks count back from the newest data day, not today.
 
 ## Data flow & persistence
 

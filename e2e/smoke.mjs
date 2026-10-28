@@ -154,6 +154,32 @@ try {
   await page.evaluate(() => { location.hash = '#/feed'; });
   await page.waitForSelector('#view-feed.active .feed-card');
 
+  // Rings: month view draws real arcs; cumulative totals are the exact sums
+  // (synthetic data: 14 days of April, Move 300+30i against a goal of 500)
+  await page.click('#nav-tabs [data-view="today"]');
+  await page.waitForSelector('#view-today.active .rings');
+  await page.click('[data-range="month"]');
+  const cells = await page.$$eval('.rings-month .ring-day.mini', c => ({ all: c.length, drawn: c.filter(x => x.querySelector('.ring-arc')).length }));
+  check(cells.drawn === 14, `month view draws arcs on every day with data (${cells.drawn} of 14; ${cells.all} cells in the month)`);
+  const moveText = await page.$eval('.ring-stat.move .ring-stat-val', e => e.textContent.replace(/\s+/g, ''));
+  check(moveText === '6,930/7,000kcal', `cumulative Move is the sum of every day over the sum of each day's goal (got ${moveText})`);
+  await page.click('[data-range="year"]');
+  check(await page.$$eval('.rings-year .ring-day', e => e.length) === 12, 'year view shows all 12 months');
+  await page.click('[data-range="day"]');
+
+  // Feed: a filter set elsewhere is visible and clearable from the Feed
+  await page.evaluate(() => { location.hash = '#/charts'; });
+  await page.waitForSelector('#filter-from');
+  await page.fill('#filter-from', '2026-04-12');
+  await page.dispatchEvent('#filter-from', 'change');
+  await page.evaluate(() => { location.hash = '#/feed'; });
+  await page.waitForSelector('#view-feed.active .active-filters .chip');
+  const narrowed = await page.$$eval('#view-feed .feed-card', c => c.length);
+  await page.click('#feed-clear-all');
+  await page.waitForFunction(() => document.querySelectorAll('#view-feed .active-filters .chip').length === 0);
+  const restored = await page.$$eval('#view-feed .feed-card', c => c.length);
+  check(narrowed < restored && restored === 7, `Feed shows a date filter set on Stats and "Clear all" removes it (${narrowed} -> ${restored})`);
+
   // Modes
   for (const mode of ['apple', 'strava', 'hybrid']) {
     await page.click(`#mode-switch [data-mode="${mode}"]`);

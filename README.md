@@ -23,7 +23,7 @@ Every mode comes in **light** (default) and **dark**, each independently designe
 
 ### What's in it
 
-- **Activity rings** (Move / Exercise / Stand) for a day, week or month, with streaks, from Apple's own ActivitySummary. No Apple data → no rings (nothing is estimated).
+- **Activity rings** (Move / Exercise / Stand) for a **day**, or **cumulative over a week, month or year**: every day added up against the sum of each day's own goal (goals change over time), with "N of M days closed" and data-coverage notes. Streaks, month calendar, from Apple's own ActivitySummary. No Apple data → no rings (nothing is estimated).
 - **Trends**: last 90 days against the past year, Apple-style.
 - **Awards**: distance, streaks, consistency, personal records, monthly challenge and ring badges, with progress toward the next ones.
 - **Feed** with route thumbnails, month totals and a "this week" panel.

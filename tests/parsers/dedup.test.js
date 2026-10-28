@@ -157,3 +157,38 @@ test('scales: 20k activities merge quickly (sorted sweep, not O(n²))', () => {
   assert.equal(mergeDuplicates(list).merged, 10000);
   assert.ok(performance.now() - t < 3000, `took ${performance.now() - t}ms`);
 });
+
+test('exact match: an Apple workout naming its Strava activity merges despite clock skew and a different distance', () => {
+  const s = strava({ id: 'strava-18186496720' });
+  // 3 hours off and 40% different distance: no heuristic would pair these
+  const a = apple({ id: 'a9', date: min(180), distance_m: 4800, external_id: 'strava://activities/18186496720', device: 'Strava', avg_heart_rate: null });
+  const other = apple({ id: 'a10', date: min(5000), external_id: null });
+  assert.deepEqual(mergeDuplicates([s, a, other]), { merged: 1 });
+  assert.equal(a.merged_into, 'strava-18186496720');
+  assert.equal(other.merged_into, null);
+  assert.equal(s.device, null, 'the "Strava" device on a Strava-written workout is not copied over');
+});
+
+test('the short strava://<id> form is accepted too', () => {
+  const s = strava({ id: 'strava-77' });
+  const a = apple({ id: 'a7', date: min(240), distance_m: 100, external_id: 'strava://77' });
+  assert.deepEqual(mergeDuplicates([s, a]), { merged: 1 });
+});
+
+test('exact match ignores a strava:// id with no matching activity', () => {
+  const s = strava({ id: 'strava-1' });
+  const a = apple({ id: 'a1', date: min(600), external_id: 'strava://999' });
+  assert.deepEqual(mergeDuplicates([s, a]), { merged: 0 });
+});
+
+test('new v2.1 fields are filled from the other source when the primary lacks them', () => {
+  const s = strava({ relative_effort: 7 });
+  const a = apple({ avg_mets: 9.1, steps: 5000, weather: { temp_c: 20, feels_c: null, humidity_pct: 50, wind_mps: null } });
+  mergeDuplicates([s, a]);
+  assert.equal(s.relative_effort, 7);
+  assert.equal(s.avg_mets, 9.1);
+  assert.equal(s.steps, 5000);
+  assert.equal(s.weather.temp_c, 20);
+  resetMerges([s, a]);
+  assert.equal(s.avg_mets, null);
+});
