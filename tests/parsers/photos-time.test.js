@@ -1,7 +1,7 @@
 import './fixtures.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyExifOffset } from '../../parsers/photos.js';
+import { applyExifOffset } from '../../src/parsers/photos.js';
 
 // exifr returns EXIF wall-clock time as a Date read in the machine's zone. Build
 // such a Date from components, the way exifr does, so the test is zone-independent.

@@ -4,9 +4,9 @@
 
 | Milestone | State | Notes |
 |---|---|---|
-| M0 Foundation | **done** | Parser bugs fixed (bare `.xml`, gzip routes, type mapping, moving time, stable ids, photo-only upload). `app.js` split into `core/` + `views/`; shared `escapeHtml`/`haversine`/tooltip/tiles; unit tests, contrast check, Chrome smoke test, CI; everything vendored, CSP, self-hosted fonts; privacy copy corrected; place naming is opt-in. |
+| M0 Foundation | **done** | Parser bugs fixed (bare `.xml`, gzip routes, type mapping, moving time, stable ids, photo-only upload). `src/app.js` split into `core/` + `views/`; shared `escapeHtml`/`haversine`/tooltip/tiles; unit tests, contrast check, Chrome smoke test, CI; everything vendored, CSP, self-hosted fonts; privacy copy corrected; place naming is opt-in. |
 | M1 Data layer | **done** | IndexedDB persistence (activities, ring summaries, packed routes), model v2, reversible duplicate **merge**, canvas heatmap. |
-| M2 Mode framework | **done** | `core/modes.js`, 3 modes × 2 themes, default hybrid + light, switcher disables modes without data. |
+| M2 Mode framework | **done** | `src/core/modes.js`, 3 modes × 2 themes, default hybrid + light, switcher disables modes without data. |
 | M3 Strava mode | **done** | Feed, activity page (splits, best efforts + PRs, synced charts), Profile with yearly stats. Added a FIT decoder, which took Strava routes from 67 to 375 of 441. |
 | M4 Apple mode | **done** | Summary with rings (day/week/month), trends, awards, workouts. |
 | M5 Hybrid mode | **done** | Today landing, merged records with per-source attribution. |
@@ -30,7 +30,7 @@
 - **Weakness:** it is a *dashboard*, not a *product*: no activity feed, no per-activity pace/splits, no rings, no awards, no persistence (re-parse every visit), no tests, no CI, no CSP/SRI.
 - **Data is thrown away at the door:** parsers keep ~14 fields; calories, cadence, power, weather, moving time, sub-types (yoga, rowing…), Apple Activity Summary (rings) are discarded, which caps what Phase 1 can show.
 - **Direction (decided):** three dataset-driven experiences: Apple mode, Strava mode, and a hybrid, each in light and dark.
-- **Architecture is at its ceiling:** `app.js` (1,833 lines, global state, full re-render on every change) and `index.html` (2,837 lines incl. all CSS) need splitting before feature volume grows.
+- **Architecture is at its ceiling:** `src/app.js` (1,833 lines, global state, full re-render on every change) and `index.html` (2,837 lines incl. all CSS) need splitting before feature volume grows.
 
 ## 2. Phase 0 findings
 
@@ -43,7 +43,7 @@ Vanilla HTML/CSS/ES modules; no `package.json`, bundler, linter, types or tests.
 - **Both sources are file-export only.** No OAuth, no Strava API, no HealthKit bridge, therefore **no rate limits or token refresh to manage** (a deliberate advantage; see Phase 2 for the cost).
 - **Strava:** `activities.csv` hand-parsed + lazy GPX from ZIP. Dates correctly handled as UTC.
 - **Apple:** streams `export.xml` via JSZip `internalStream` (875MB in ~4s, good); regex attribute extraction; routes attach only via `<FileReference>` (correct, documented).
-- **Dedup:** `flagDuplicates` (app.js:275) O(n²), cross-source only, same type, start within 10 min, distance within 10%. It **flags but never merges**, so totals double-count unless filtered. Docblock stale (says 5 min/5%).
+- **Dedup:** `flagDuplicates` (src/app.js:275) O(n²), cross-source only, same type, start within 10 min, distance within 10%. It **flags but never merges**, so totals double-count unless filtered. Docblock stale (says 5 min/5%).
 - **Storage:** none beyond UI prefs in localStorage. Every visit re-parses.
 
 ### 2.3 Map layer
@@ -72,8 +72,8 @@ Correctness bugs found: Strava `duration_s` uses *Elapsed* time but UI labels it
 ### 2.7 Blockers (fix before Phase 1)
 1. **Persistence:** no IndexedDB cache; every Phase 1 screen needs fast reload and richer stored data.
 2. **Data model too thin:** add moving time, calories, cadence, power, weather, sub-type, per-point streams; Apple Activity Summary (rings) and workout statistics. Without this Phase 1 cannot be built.
-3. **`app.js` monolith + full re-render:** split into state/filters/format/views; introduce a small store with targeted updates; debounce search.
-4. **Verified parser bugs:** `extractWorkoutStrings` undefined (apple.js:283); `.gpx.gz` never decompressed (strava.js:225-227); Strava type-name mapping; moving-time; photo-only upload early return (app.js:179, flagged by audit *(unverified)* since the guard is on `sourcesToParse`).
+3. **`src/app.js` monolith + full re-render:** split into state/filters/format/views; introduce a small store with targeted updates; debounce search.
+4. **Verified parser bugs:** `extractWorkoutStrings` undefined (apple.js:283); `.gpx.gz` never decompressed (strava.js:225-227); Strava type-name mapping; moving-time; photo-only upload early return (src/app.js:179, flagged by audit *(unverified)* since the guard is on `sourcesToParse`).
 5. **Dedup must merge, not flag**, so totals and the feed are truthful; keep both source records, choose a primary.
 6. **Map scalability:** canvas renderer (`preferCanvas`) + decimation + a spatial index before feed/segments/coverage work.
 7. **Security baseline:** vendor or pin+SRI all scripts, add CSP, pin D3, fix privacy copy, consent for Nominatim.
@@ -118,10 +118,10 @@ Single `haversine`/`escapeHtml`/tile-config modules; delete dead code (`estimate
 | Awards/badges | Apple | records only | badge system | rule engine (streaks, distance milestones, PRs, monthly challenge), original SVG badges, earned-date | M | model v2 |
 | Workout summary tiles | Apple | partial | large-number tiles | restyle detail header | S | design |
 | Visual language | both | dashboard | typography, motion, density | new tokens (rounded display font, motion/spring tokens, reduced-motion), ring/accent palette | M | — |
-| Mode framework | both | one shell | three shells (Apple / Strava / Hybrid), auto-select + override, per-mode nav and landing | mode registry: nav config, landing view, token set, module visibility; shared components | M | split of app.js, token system |
+| Mode framework | both | one shell | three shells (Apple / Strava / Hybrid), auto-select + override, per-mode nav and landing | mode registry: nav config, landing view, token set, module visibility; shared components | M | split of src/app.js, token system |
 
 ### 3.3 Milestones (in order)
-**M0 — Foundation (L).** Tasks: fix verified parser bugs; add Node parser tests + Playwright smoke (fixtures synthetic); split `app.js`; shared util modules; store + debounce; vendor/pin libs + SRI + CSP; Pages workflow; fix privacy copy; Nominatim consent. *Accept:* tests green in CI; real exports parse (Strava `.gz` routes load; plain `.xml` works); no CDN script without SRI/pin; Lighthouse a11y ≥ 90 on Map and Stats; behavior unchanged visually.
+**M0 — Foundation (L).** Tasks: fix verified parser bugs; add Node parser tests + Playwright smoke (fixtures synthetic); split `src/app.js`; shared util modules; store + debounce; vendor/pin libs + SRI + CSP; Pages workflow; fix privacy copy; Nominatim consent. *Accept:* tests green in CI; real exports parse (Strava `.gz` routes load; plain `.xml` works); no CDN script without SRI/pin; Lighthouse a11y ≥ 90 on Map and Stats; behavior unchanged visually.
 **M1 — Data layer (M).** IndexedDB persistence, model v2, dedup merge, canvas heatmap + decimation. *Accept:* reload shows data in <1s without re-upload; "Clear data" control; totals no longer double-count; 1,000-route synthetic heatmap pans at ≥ 30fps; "Delete all data" works.
 **M2 — Mode framework + shared components (M).** Hash routing; mode registry (nav, landing, token set, module visibility); source detection and manual override switcher; per-mode token sets × 2 themes scaffolded; shared components extracted (stat tile, ring, chart card, route map, splits table). *Accept:* loading Apple-only, Strava-only, and both each land in the right mode; switcher persists; no mode-specific logic inside parsers or shared components.
 **M3 — Strava mode (L).** Feed with mini-map cards, full activity detail (splits, pace/HR/elevation synced charts with scrub-to-map, best efforts), profile with weekly/yearly stats and year selector, Strava-style PRs/streaks. *Accept:* every routed activity opens `#/activity/<id>`; chart scrub moves a map marker; splits sum to distance within 1%; yearly totals reconcile with the feed.

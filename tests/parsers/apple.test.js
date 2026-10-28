@@ -2,7 +2,7 @@ import './fixtures.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeZip, namedBuffer, SAMPLE_GPX } from './fixtures.js';
-import { parse, parseApple, parseAppleExport } from '../../parsers/apple.js';
+import { parse, parseApple, parseAppleExport } from '../../src/parsers/apple.js';
 
 const RUN = `<Workout workoutActivityType="HKWorkoutActivityTypeRunning" duration="30" durationUnit="min" sourceName="Test Watch" sourceVersion="1" creationDate="2026-04-22 08:00:00 -0400" startDate="2026-04-22 07:00:00 -0400" endDate="2026-04-22 07:30:00 -0400">
   <MetadataEntry key="HKIndoorWorkout" value="0"/>

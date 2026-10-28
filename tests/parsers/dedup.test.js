@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createActivity } from '../../parsers/model.js';
-import { mergeDuplicates, resetMerges, visibleActivities } from '../../core/dedup.js';
+import { createActivity } from '../../src/parsers/model.js';
+import { mergeDuplicates, resetMerges, visibleActivities } from '../../src/core/data/dedup.js';
 
 const T0 = Date.UTC(2026, 3, 22, 12, 0, 0);
 const min = (n) => new Date(T0 + n * 60000);

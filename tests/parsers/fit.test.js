@@ -3,8 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
 import { csv, makeZip, STRAVA_HEADERS, stravaRow } from './fixtures.js';
-import { parseFit, parseFitRecords, parseFitSummary } from '../../parsers/fit.js';
-import { parse } from '../../parsers/strava.js';
+import { parseFit, parseFitRecords, parseFitSummary } from '../../src/parsers/fit.js';
+import { parse } from '../../src/parsers/strava.js';
 
 // ── Tiny FIT encoder (test helper) ───────────────────────────────────────────
 const FIT_EPOCH = Date.UTC(1989, 11, 31);

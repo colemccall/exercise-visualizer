@@ -21,7 +21,7 @@ what the app *does*. This file covers what a contributor needs to know.
   (yearly stats), **Stats** (the legacy ~30 statistics, filters, D3 charts), **Photos** (Photo Tour).
 - IndexedDB persistence; a reload restores data without re-parsing. "Delete my data" in the menu.
 - Duplicate workouts across Strava and Apple are **merged**, not just flagged.
-- Strava routes from `.gpx`, `.gpx.gz`, `.fit`, `.fit.gz` (own FIT decoder, `parsers/fit.js`).
+- Strava routes from `.gpx`, `.gpx.gz`, `.fit`, `.fit.gz` (own FIT decoder, `src/parsers/fit.js`).
   The real export is mostly FIT: before the decoder only 67 of 441 activities had a route; now 375.
 - All third-party code is vendored under `vendor/`; a CSP meta tag forbids anything else.
 - Unit tests (`npm test`), contrast check, and a real-Chrome smoke test (`npm run e2e`).
@@ -36,20 +36,20 @@ minutes to show up — or need a hard reload. Confirm what is actually live by f
 
 **Known gaps:**
 - [ ] Photo Tour + video export against real photos and a phone (not exercised in any pass;
-      `photos/composite.js` basemap provider changed 2026-09-23). The cinema view isn't audited narrow.
+      `src/photos/composite.js` basemap provider changed 2026-09-23). The cinema view isn't audited narrow.
 - [ ] Physical iPhone: real Files-app upload, Safari memory on a large Apple ZIP.
 - [ ] Web Worker for parsing — only if a real export is measured to freeze. FIT decode of all 375
       routes takes ~12s on the main thread (chunked with yields; single routes are tens of ms).
 - [ ] Share card (html2canvas PNG); Phase 2 ideas in docs/ROADMAP.md.
-- [ ] Awards titles are miles-based English strings from `analysis/awards.js`; progress text honours units.
+- [ ] Awards titles are miles-based English strings from `src/analysis/health/awards.js`; progress text honours units.
 
 No auth. Data is stored only in this browser (IndexedDB), never sent anywhere.
 
 ## Sources
 
 Strava and Apple Health only. **Garmin is deliberately not supported** — a written
-but never-wired-up `parsers/garmin.js` was deleted on 2026-08-10 (it had no drop
-zone and was never imported by `app.js`). Don't "restore" it without a real Garmin
+but never-wired-up `src/parsers/garmin.js` was deleted on 2026-08-10 (it had no drop
+zone and was never imported by `src/app.js`). Don't "restore" it without a real Garmin
 export to test against; recover it from git history if it's ever wanted back.
 
 ## Tech Stack
@@ -71,27 +71,33 @@ Nominatim for the opt-in place names). Adding a new external host means editing 
 ## Key Files
 
 ```
-index.html            shell: nav, upload dialog, view containers, legacy view CSS (Map/Stats/Photos)
-app.js                orchestrator only: nav + mode switch + theme + routing + upload dialog
-core/                 state (store + pub/sub), modes, router, store (IndexedDB), upload, dedup,
-                      format (units), routes (lazy loading), ui (toast/modal/layout), collapse, util
-parsers/              strava, apple, gpx, fit, photos, model (createActivity)
-analysis/             PURE logic, unit-tested, no DOM: streams, splits, efforts, yearly, trends,
-                      rings, awards, feed, dates
-views/                today, feed, activity, awards, profile, stats-view, map-view
-components/           rings, badge, icons, thumb (route SVG), year-summary
-charts/               D3: distance, weekly, hr-zones, records, stats, stream (synced), tooltip
-map/                  heatmap (canvas), route (single route + scrub marker), tiles (shared basemap)
-photos/               matcher, list, detail, heic, video, composite, export
-styles/               fonts.css, modes.css (tokens for 6 variants + nav), views.css
-vendor/               third-party code and self-hosted fonts
-design-system/        theme.css (shared with sibling apps), activity-colors.js, fitness-theme.md
-tests/ e2e/ scripts/  unit tests, smoke test + static server, check-contrast.mjs, prepare_photos.py
+index.html              app shell: nav, upload dialog, view containers (stays at the root: GitHub Pages serves it)
+src/
+  app.js                orchestrator: nav, modes, theme, routing, upload dialog
+  core/
+    state.js modes.js router.js      shared store + pub/sub, the three modes, hash router
+    data/   store.js (IndexedDB)  upload.js  dedup.js (reversible merge)  routes.js (lazy trackpoints)
+    lib/    format.js (units + formatters)  util.js  ui.js (toast, dialogs, layout)  collapse.js
+  parsers/              strava.js apple.js gpx.js fit.js photos.js model.js (activity model v2)
+  analysis/             pure, unit-tested logic with no DOM
+    activity/           streams splits efforts yearly trends feed
+    health/             rings awards   (nutrition lands here)
+    dates.js
+  views/                today feed activity awards profile stats-view map-view
+  components/           rings, badges, icons, route thumbnails, year summary (SVG, no deps)
+  charts/               D3 charts (distance, weekly, hr-zones, records, stats) + stream.js (synced)
+  map/                  heatmap.js, route.js, tiles.js
+  photos/               matcher, list, detail (cinema tour), HEIC, video export pipeline
+  styles/               fonts.css, modes.css (6 variants), views.css
+  design-system/        shared theme + activity colours (Okabe-Ito)
+vendor/                 Leaflet, JSZip, D3, exifr, libheif, webm-muxer, fonts (self-hosted)
+tests/                  mirrors src/ (parsers/, analysis/activity/, analysis/health/)
+e2e/  scripts/  docs/   smoke test + static server, contrast check + photo helper, roadmap
 ```
 
 ## Normalized Activity Model (v2)
 
-Every parser returns this (`parsers/model.js createActivity()`); the UI never reads raw source data.
+Every parser returns this (`src/parsers/model.js createActivity()`); the UI never reads raw source data.
 See README for the field list. Things that are easy to get wrong:
 
 - `duration_s` is *elapsed* time; `moving_s` is moving time (Strava Moving Time; Apple: same as duration).
@@ -99,8 +105,8 @@ See README for the field list. Things that are easy to get wrong:
 - `sources` is `['strava']`, `['apple']` or both after a merge. `merged_into` is set on the *secondary*
   record; everything user-facing must skip records with `merged_into` (`state.scoped()` does).
 - Route points are `{lat,lng,ele,time,hr,cad,watts}`; `route_points` is lazy — always go through
-  `core/routes.js ensureRoute()`. FIT tracks have GPS dropouts, so raw haversine over points can exceed the
-  session distance; splits/charts use the smoothing in `analysis/streams.js`.
+  `src/core/data/routes.js ensureRoute()`. FIT tracks have GPS dropouts, so raw haversine over points can exceed the
+  session distance; splits/charts use the smoothing in `src/analysis/activity/streams.js`.
 
 ### Timezone gotcha (bit us once — don't regress it)
 
@@ -108,7 +114,7 @@ Strava's `activities.csv` writes `"Apr 22, 2026, 3:14:03 AM"` with **no timezone
 marker, and the value is UTC**. Handing that to `new Date()` reads it as *local*
 time and shifts every activity by the viewer's UTC offset — enough to move
 late-evening workouts to the next day and to break cross-source dedup entirely
-(dedup only pairs activities within 10 minutes). `parsers/strava.js` has
+(dedup only pairs activities within 10 minutes). `src/parsers/strava.js` has
 `parseStravaDate()` for this; it's verified against the Z-suffixed `<time>` of the
 first GPX trackpoint, which agrees to the second.
 
@@ -122,33 +128,33 @@ no route (yoga, strength), handing them someone else's GPS trace.
 
 ## Modes (Hybrid / Apple / Strava)
 
-`core/modes.js` is a registry: each mode has a nav list, a landing view and a source scope. A mode is
+`src/core/modes.js` is a registry: each mode has a nav list, a landing view and a source scope. A mode is
 only a *shell* (nav, landing, type, radius, density, which activities are in scope) — it never touches
 parsing. The app defaults to **hybrid**; `restoreMode()` only honours a saved mode while its source is
-still loaded. `body[data-mode]` + `html.dark-mode` select one of six token sets in `styles/modes.css`.
+still loaded. `body[data-mode]` + `html.dark-mode` select one of six token sets in `src/styles/modes.css`.
 
-- Add/rename a nav entry: `core/modes.js`. Add a view: a `<section data-view>` in `index.html`, a renderer in
-  `app.js` `renderers`, and a module in `views/`.
+- Add/rename a nav entry: `src/core/modes.js`. Add a view: a `<section data-view>` in `index.html`, a renderer in
+  `src/app.js` `renderers`, and a module in `views/`.
 - Colour tokens: `--page --card --card-2 --accent --on-accent --ring-* --font-display --font-num`.
   **Use `--on-accent` for text on accent fills** (white fails AA on the dark accents). After touching a
   palette run `npm run contrast`.
 - Rendering is lazy: events (`data filters units theme mode`) mark every view dirty and only the visible
   one re-renders; the Map view and Activity page always re-render on show.
-- Stats-style numbers must use `moving_s`, units must go through `core/format.js`.
+- Stats-style numbers must use `moving_s`, units must go through `src/core/lib/format.js`.
 - "Now" for trends / this-week is `dataAnchor()` — an export is a snapshot, so if the newest activity is
   >3 weeks old it anchors there instead of today (otherwise "last 90 days" is empty).
 
 ## Data flow & persistence
 
-`core/upload.js parseStaged()` → parse each source → **save raw activities to IndexedDB (before merging;
-merging mutates)** → `rebuildMerge()` (`core/dedup.js`, reversible via `_premerge`) → `emit('data')`.
+`src/core/data/upload.js parseStaged()` → parse each source → **save raw activities to IndexedDB (before merging;
+merging mutates)** → `rebuildMerge()` (`src/core/data/dedup.js`, reversible via `_premerge`) → `emit('data')`.
 `saveRoutesInBackground()` then decodes every route once and stores it packed in typed arrays
-(`core/store.js`), so the next visit's `_gpxLoader` reads from IndexedDB. `restoreSaved()` runs at boot.
-Photos are never persisted. Bumping `SCHEMA` in `core/store.js` discards older saved data.
+(`src/core/data/store.js`), so the next visit's `_gpxLoader` reads from IndexedDB. `restoreSaved()` runs at boot.
+Photos are never persisted. Bumping `SCHEMA` in `src/core/data/store.js` discards older saved data.
 
 ## Collapsible Panels
 
-Anything carrying `data-collapse="<key>"` is a toggle (`core/collapse.js`); the section it folds is its
+Anything carrying `data-collapse="<key>"` is a toggle (`src/core/lib/collapse.js`); the section it folds is its
 closest `.panel` / `.chart-card` / `#explore-panel`, which gets `collapsed`. State persists under
 `fitness-collapsed:<key>`. **D3 charts must be re-drawn after expanding** (they size to
 `container.clientWidth`, 0 while hidden): `initCollapsibles(onChange)` is wired to `redrawCharts()`, and
@@ -172,13 +178,13 @@ and the banner comes and goes. Call it after anything that changes that chrome.
 `body.view-map-active` sets `overflow: hidden`, since the view is exactly one
 viewport tall and shouldn't also scroll.
 
-The tools strip is collapsed by default (`COLLAPSED_BY_DEFAULT` in `app.js`);
+The tools strip is collapsed by default (`COLLAPSED_BY_DEFAULT` in `src/app.js`);
 clicking any of its tabs opens it rather than switching a hidden pane.
 
 ## Route Selection
 
 Routes are the content, so they behave like it: `setRouteHandlers()` in
-`map/heatmap.js` takes `onHover`/`onSelect` from `app.js`, which owns the card
+`src/map/heatmap.js` takes `onHover`/`onSelect` from `src/app.js`, which owns the card
 UI. `highlightRoute()` draws a casing in the page background colour plus the
 route in its own colour — two lines rather than one thick one, so the highlight
 reads against both a dense cluster and an empty map. The click handler calls
@@ -188,8 +194,8 @@ activity, deliberately independent of the filters.
 
 ## Basemaps and Zoom
 
-Two stacked tile layers in `map/heatmap.js` (and the same pair in
-`map/route.js`):
+Two stacked tile layers in `src/map/heatmap.js` (and the same pair in
+`src/map/route.js`):
 
 - **z0-16** Esri `World_Light_Gray_Base` — the neutral canvas routes read best
   against. Its tiles simply stop at z16.
@@ -198,7 +204,7 @@ Two stacked tile layers in `map/heatmap.js` (and the same pair in
   go past z16.
 
 **Do not use `basemaps.cartocdn.com`.** It now stamps "API KEY REQUIRED" across
-keyless tiles — that is why `photos/composite.js` (video export) was switched to
+keyless tiles — that is why `src/photos/composite.js` (video export) was switched to
 the Esri tiles too; the watermark was being baked into exported frames.
 
 Dark mode does not swap providers. `html.dark-mode .leaflet-tile-pane` inverts
@@ -238,7 +244,7 @@ Miles are the default. `fitness-units` alone is not trusted at startup — an
 earlier build wrote a value into it on load, so a stored preference only counts
 when `fitness-units-explicit` is `'1'`, which `setUnits()` sets on a real click
 of the km/mi toggle. Every user-visible distance must go through the formatters
-in `app.js` (charts receive `units`; `charts/stats.js` receives the whole `fmt`
+in `src/app.js` (charts receive `units`; `src/charts/stats.js` receives the whole `fmt`
 bundle). A hardcoded `km` slipped into the weekly calendar's tooltip that way.
 
 ## Mobile / iOS
@@ -287,7 +293,7 @@ currently needed.
 
 ## Activity Type Colors
 
-Import from `design-system/activity-colors.js` — do not redeclare these:
+Import from `src/design-system/activity-colors.js` — do not redeclare these:
 ```javascript
 Run: '#D55E00'  Ride: '#0072B2'  Walk: '#009E73'
 Hike: '#E69F00' Swim: '#56B4E9'  Other: '#8A8D99'

@@ -2,7 +2,7 @@ import './fixtures.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gpx, SAMPLE_GPX } from './fixtures.js';
-import { parseGPX, computeElevationGain, computeDistance } from '../../parsers/gpx.js';
+import { parseGPX, computeElevationGain, computeDistance } from '../../src/parsers/gpx.js';
 
 test('parseGPX reads lat/lng/ele/time and HR, cadence, power extensions', () => {
   const pts = parseGPX(SAMPLE_GPX);

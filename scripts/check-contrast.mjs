@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'styles', 'modes.css'), 'utf8');
+const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles', 'modes.css'), 'utf8');
 
 function lum(hex) {
   const n = parseInt(hex.slice(1), 16);

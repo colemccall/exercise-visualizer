@@ -111,29 +111,28 @@ Next page load, `data/photos.json` is picked up automatically. Matching still ru
 ## Architecture
 
 ```
-index.html            app shell (nav, upload dialog, view containers) + legacy view CSS
-app.js                orchestrator: nav, modes, theme, routing, upload dialog
-core/
-  state.js            shared store + tiny pub/sub; scoped()/filtered() activity lists
-  modes.js            the three modes: nav, landing, scope
-  router.js           hash router (#/feed, #/activity/<id>, …)
-  store.js            IndexedDB persistence (raw activities, ring summaries, packed routes)
-  upload.js           staging, parsing, merge, background route saving, restore, delete
-  dedup.js            cross-source duplicate detection + reversible merge
-  format.js           units + every number formatter
-  routes.js           lazy trackpoint loading with a concurrency cap
-  ui.js, util.js, collapse.js
-parsers/              strava.js, apple.js, gpx.js, fit.js, photos.js, model.js (activity model v2)
-analysis/             pure, tested logic: streams, splits, efforts, yearly, trends, rings, awards, feed
-views/                today, feed, activity, awards, profile, stats-view, map-view
-components/           rings, badges, icons, route thumbnails, year summary (SVG, no deps)
-charts/               D3 charts (distance, weekly, hr-zones, records, stats) + stream.js (synced)
-map/                  heatmap.js, route.js, tiles.js
-photos/               matcher, list, detail (cinema tour), HEIC, video export pipeline
-styles/               fonts.css, modes.css (6 variants), views.css
-vendor/               Leaflet, JSZip, D3, exifr, libheif, webm-muxer, fonts (self-hosted)
-design-system/        shared theme + activity colours (Okabe-Ito)
-e2e/, tests/          smoke test + unit tests
+index.html              app shell: nav, upload dialog, view containers (stays at the root: GitHub Pages serves it)
+src/
+  app.js                orchestrator: nav, modes, theme, routing, upload dialog
+  core/
+    state.js modes.js router.js      shared store + pub/sub, the three modes, hash router
+    data/   store.js (IndexedDB)  upload.js  dedup.js (reversible merge)  routes.js (lazy trackpoints)
+    lib/    format.js (units + formatters)  util.js  ui.js (toast, dialogs, layout)  collapse.js
+  parsers/              strava.js apple.js gpx.js fit.js photos.js model.js (activity model v2)
+  analysis/             pure, unit-tested logic with no DOM
+    activity/           streams splits efforts yearly trends feed
+    health/             rings awards   (nutrition lands here)
+    dates.js
+  views/                today feed activity awards profile stats-view map-view
+  components/           rings, badges, icons, route thumbnails, year summary (SVG, no deps)
+  charts/               D3 charts (distance, weekly, hr-zones, records, stats) + stream.js (synced)
+  map/                  heatmap.js, route.js, tiles.js
+  photos/               matcher, list, detail (cinema tour), HEIC, video export pipeline
+  styles/               fonts.css, modes.css (6 variants), views.css
+  design-system/        shared theme + activity colours (Okabe-Ito)
+vendor/                 Leaflet, JSZip, D3, exifr, libheif, webm-muxer, fonts (self-hosted)
+tests/                  mirrors src/ (parsers/, analysis/activity/, analysis/health/)
+e2e/  scripts/  docs/   smoke test + static server, contrast check + photo helper, roadmap
 ```
 
 ### Normalized activity model (v2)

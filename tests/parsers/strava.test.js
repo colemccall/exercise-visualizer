@@ -2,7 +2,7 @@ import './fixtures.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { csv, gzip, makeZip, namedBuffer, SAMPLE_GPX, STRAVA_HEADERS, stravaRow } from './fixtures.js';
-import { parse } from '../../parsers/strava.js';
+import { parse } from '../../src/parsers/strava.js';
 
 const parseCsv = async (rows) =>
   parse(namedBuffer(csv(STRAVA_HEADERS, rows), 'activities.csv'));
