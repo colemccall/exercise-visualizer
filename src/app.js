@@ -37,6 +37,7 @@ import { renderFeed, resetFeedPaging } from './views/feed.js';
 import { renderActivity, destroyActivity, setActivityHandlers } from './views/activity.js';
 import { renderAwards } from './views/awards.js';
 import { renderProfile } from './views/profile.js';
+import { renderPlan } from './views/plan.js';
 import { renderStatsView, initStatsView, redrawCharts } from './views/stats-view.js';
 import {
   renderMapView, initMapView, invalidateMap, resetMapDrawing, clearRouteSelection,
@@ -47,8 +48,8 @@ import {
 // VIEW REGISTRY + ROUTING
 // ═════════════════════════════════════════════════════════════════════════════
 
-const VIEW_ICON = { today: 'today', feed: 'feed', map: 'map', awards: 'awards', charts: 'charts', profile: 'profile', photos: 'photos' };
-const KNOWN_VIEWS = new Set(['today', 'feed', 'activity', 'map', 'awards', 'profile', 'charts', 'photos']);
+const VIEW_ICON = { today: 'today', feed: 'feed', map: 'map', awards: 'awards', charts: 'charts', profile: 'profile', plan: 'plan', photos: 'photos' };
+const KNOWN_VIEWS = new Set(['today', 'feed', 'activity', 'map', 'awards', 'profile', 'plan', 'charts', 'photos']);
 
 const renderers = {
   today: () => renderToday({ openUpload }),
@@ -56,6 +57,7 @@ const renderers = {
   map: renderMapView,
   awards: renderAwards,
   profile: renderProfile,
+  plan: renderPlan,
   charts: renderStatsView,
   photos: renderPhotosView,
 };
@@ -70,6 +72,7 @@ function navTabFor(view) {
   if (view === 'activity') return 'feed';
   if (nav.includes(view)) return view;
   if (view === 'charts' && nav.includes('profile')) return 'profile';
+  if (view === 'awards' && nav.includes('today')) return 'today';   // reached from Today's Awards card
   return null;
 }
 

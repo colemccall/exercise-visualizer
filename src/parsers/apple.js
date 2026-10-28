@@ -82,6 +82,96 @@ function toKcal(value, unit) {
   return value; // 'Cal' and 'kcal' are both kilocalories in HealthKit
 }
 
+// ── Health records (body, energy, nutrition) ─────────────────────────────────
+// Only the record types the planner needs. ActiveEnergyBurned is deliberately absent:
+// the ActivitySummary's Move value is Apple's own per-day total, whereas summing raw
+// records double counts when an iPhone and a Watch both write them.
+const HEALTH_RECORD_RE = /<Record type="HKQuantityTypeIdentifier(BasalEnergyBurned|BodyMass|Height|DietaryEnergyConsumed|DietaryProtein|DietaryCarbohydrates|DietaryFatTotal)"([^>]*)>/g;
+
+const attrIn = (s, name) => {
+  const i = s.indexOf(name + '="');
+  if (i === -1) return null;
+  const from = i + name.length + 2;
+  return s.slice(from, s.indexOf('"', from));
+};
+const toKg = (v, u) => { const x = (u || 'kg').toLowerCase(); return x === 'lb' ? v * 0.45359237 : x === 'g' ? v / 1000 : x === 'st' ? v * 6.35029318 : v; };
+const toCm = (v, u) => { const x = (u || 'cm').toLowerCase(); return x === 'ft' ? v * 30.48 : x === 'in' ? v * 2.54 : x === 'm' ? v * 100 : v; };
+const toGrams = (v, u) => { const x = (u || 'g').toLowerCase(); return x === 'mg' ? v / 1000 : x === 'oz' ? v * 28.3495 : x === 'kg' ? v * 1000 : v; };
+
+/**
+ * Collects the planner's inputs while the export streams past.
+ *   me          { birth_year, sex }      only the year is kept, never the full birth date
+ *   basal_by_day  { 'YYYY-MM-DD': kcal } the largest source per day (no double counting, survives device changes)
+ *   dietary_by_day{ date: {kcal, protein, carbs, fat} } likewise (macros from the winning source)
+ *   weights     [{ date, kg, source }]   every body-mass entry
+ *   height_cm   latest height
+ */
+function createHealthCollector() {
+  const basal = {}, dietary = {}, weights = [], heights = [];
+  let me = null;
+
+  const bump = (store, src, day, field, v) => {
+    const s = store[src] || (store[src] = {});
+    const d = s[day] || (s[day] = { kcal: 0, protein: 0, carbs: 0, fat: 0 });
+    d[field] += v;
+  };
+
+  const onMe = (tag) => {
+    const dob = attrIn(tag, 'HKCharacteristicTypeIdentifierDateOfBirth');
+    const sexRaw = attrIn(tag, 'HKCharacteristicTypeIdentifierBiologicalSex') || '';
+    const sex = /Female/i.test(sexRaw) ? 'female' : /Male/i.test(sexRaw) ? 'male' : null;
+    const year = dob ? parseInt(dob.slice(0, 4), 10) : NaN;
+    me = { birth_year: isNaN(year) ? null : year, sex };
+  };
+
+  const onRecord = (kind, attrs) => {
+    const value = parseFloat(attrIn(attrs, 'value'));
+    const start = attrIn(attrs, 'startDate');
+    if (isNaN(value) || !start) return;
+    const day = start.slice(0, 10);
+    const unit = attrIn(attrs, 'unit');
+    const src = attrIn(attrs, 'sourceName') || '';
+    switch (kind) {
+      case 'BasalEnergyBurned': bump(basal, src, day, 'kcal', toKcal(value, unit)); break;
+      case 'DietaryEnergyConsumed': bump(dietary, src, day, 'kcal', toKcal(value, unit)); break;
+      case 'DietaryProtein': bump(dietary, src, day, 'protein', toGrams(value, unit)); break;
+      case 'DietaryCarbohydrates': bump(dietary, src, day, 'carbs', toGrams(value, unit)); break;
+      case 'DietaryFatTotal': bump(dietary, src, day, 'fat', toGrams(value, unit)); break;
+      case 'BodyMass': { const kg = toKg(value, unit); if (kg > 20 && kg < 400) weights.push({ date: day, kg: Math.round(kg * 100) / 100, source: src }); break; }
+      case 'Height': { const cm = toCm(value, unit); if (cm > 80 && cm < 250) heights.push({ date: day, cm: Math.round(cm * 10) / 10 }); break; }
+      default: break;
+    }
+  };
+
+  // Per day, take the source that recorded the most. Two writers of the same data
+  // (an iPhone and a Watch, or two nutrition apps) would double count if added; and
+  // picking one "main" source for the whole export would drop the days after a device
+  // change (a real export's basal energy switched Watch mid-2025).
+  const bestPerDay = (store) => {
+    const out = {};
+    for (const days of Object.values(store)) {
+      for (const [day, v] of Object.entries(days)) if (!out[day] || v.kcal > out[day].kcal) out[day] = v;
+    }
+    return out;
+  };
+
+  const finish = () => {
+    const basalDays = bestPerDay(basal);
+    const dietaryDays = bestPerDay(dietary);
+    weights.sort((p, q) => (p.date < q.date ? -1 : 1));
+    heights.sort((p, q) => (p.date < q.date ? -1 : 1));
+    return {
+      me,
+      basal_by_day: Object.fromEntries(Object.entries(basalDays).map(([d, v]) => [d, Math.round(v.kcal)])),
+      dietary_by_day: Object.fromEntries(Object.entries(dietaryDays).filter(([, v]) => v.kcal > 0)
+        .map(([d, v]) => [d, { kcal: Math.round(v.kcal), protein: Math.round(v.protein), carbs: Math.round(v.carbs), fat: Math.round(v.fat) }])),
+      weights,
+      height_cm: heights.length ? heights[heights.length - 1].cm : null,
+    };
+  };
+  return { onMe, onRecord, finish };
+}
+
 // ── Streaming extraction ──────────────────────────────────────────────────────
 /**
  * Incremental scanner over decoded export.xml text. Feed it chunks with
@@ -93,16 +183,41 @@ function toKcal(value, unit) {
  * @param {(xml: string) => void} onWorkout
  * @param {(tag: string) => void} onSummary
  */
-function createScanner(onWorkout, onSummary) {
+function createScanner(onWorkout, onSummary, { onRecord, onMe } = {}) {
   const WORKOUT_OPEN = '<Workout ';
   const WORKOUT_CLOSE = '</Workout>';
   const SUMMARY_OPEN = '<ActivitySummary ';
   // Long enough to hold the longest opening marker split across two chunks.
   const TAIL = SUMMARY_OPEN.length;
   let carry = '';
+  // Health records (body weight, basal energy, …) are matched with one regex over
+  // each chunk. A record can straddle two chunks, so keep a tail long enough for one
+  // opening tag; matches that end inside the carried tail were already handled.
+  let recCarry = '';
+  let meTries = 0;
+
+  function scanHealth(chunk) {
+    if (onMe && !onMe.done && meTries++ < 30) {
+      const i = chunk.indexOf('<Me ');
+      if (i !== -1) {
+        const end = chunk.indexOf('>', i);
+        if (end !== -1) { onMe(chunk.slice(i, end + 1)); onMe.done = true; }
+      }
+    }
+    if (!onRecord) return;
+    const text = recCarry + chunk;
+    HEALTH_RECORD_RE.lastIndex = 0;
+    let m;
+    while ((m = HEALTH_RECORD_RE.exec(text))) {
+      if (m.index + m[0].length <= recCarry.length) continue; // already handled in the tail
+      onRecord(m[1], m[2]);
+    }
+    recCarry = text.slice(-700);
+  }
 
   return {
     push(chunk) {
+      scanHealth(chunk);
       const text = carry + chunk;
       carry = '';
       let pos = 0;
@@ -148,12 +263,12 @@ function createScanner(onWorkout, onSummary) {
  * Stream a JSZip entry through the scanner without building the full string.
  * @returns {Promise<{workouts: string[], summaries: string[]}>}
  */
-function streamZipEntry(zipEntry, onBytes) {
+function streamZipEntry(zipEntry, onBytes, sinks) {
   return new Promise((resolve, reject) => {
     const decoder = new TextDecoder('utf-8');
     const workouts = [];
     const summaries = [];
-    const scanner = createScanner(w => workouts.push(w), s => summaries.push(s));
+    const scanner = createScanner(w => workouts.push(w), s => summaries.push(s), sinks);
     let bytesProcessed = 0;
 
     zipEntry.internalStream('uint8array')
@@ -174,10 +289,10 @@ function streamZipEntry(zipEntry, onBytes) {
  * one (browsers, Node Blob) so a huge XML is never read into a single string;
  * otherwise falls back to slicing the text / bytes we were given.
  */
-async function streamPlainXml(file, onBytes) {
+async function streamPlainXml(file, onBytes, sinks) {
   const workouts = [];
   const summaries = [];
-  const scanner = createScanner(w => workouts.push(w), s => summaries.push(s));
+  const scanner = createScanner(w => workouts.push(w), s => summaries.push(s), sinks);
   const decoder = new TextDecoder('utf-8');
   let bytesProcessed = 0;
 
@@ -407,13 +522,18 @@ function parseWorkoutXml(workoutXml, index) {
  * Parse an Apple Health export into activities + daily ring summaries.
  * @param {File} file   A .zip or .xml File object
  * @param {Function} onProgress  (pct: number, label: string) => void
- * @returns {Promise<{activities: Activity[], summaries: object[]}>}
+ * @returns {Promise<{activities: Activity[], summaries: object[], health: object}>}
  *   summaries: [{ date:'YYYY-MM-DD', move_kcal, move_goal, exercise_min,
  *                 exercise_goal, stand_hours, stand_goal }] sorted ascending
+ *   health: { me:{birth_year, sex}|null, basal_by_day, dietary_by_day, weights, height_cm }
+ *           (inputs for the nutrition planner; see createHealthCollector)
  */
 export async function parseAppleExport(file, onProgress = () => {}) {
   const activities = [];
   let summaries = [];
+  const collector = createHealthCollector();
+  const sinks = { onRecord: collector.onRecord, onMe: Object.assign(collector.onMe, { done: false }) };
+  const emptyHealth = () => ({ me: null, basal_by_day: {}, dietary_by_day: {}, weights: [], height_cm: null });
 
   onProgress(5, 'Reading Apple Health export…');
 
@@ -435,7 +555,7 @@ export async function parseAppleExport(file, onProgress = () => {}) {
     if (!xmlEntry) {
       console.warn('Apple Health ZIP: no export.xml found');
       onProgress(100, 'No export.xml found in ZIP');
-      return { activities, summaries };
+      return { activities, summaries, health: emptyHealth() };
     }
 
     onProgress(15, 'Streaming export.xml…');
@@ -443,7 +563,7 @@ export async function parseAppleExport(file, onProgress = () => {}) {
     extracted = await streamZipEntry(xmlEntry, (bytes, found) => {
       const pct = totalSize ? Math.min(55, Math.round((bytes / totalSize) * 55)) : 0;
       onProgress(15 + pct, `Scanning XML… ${found} workouts found`);
-    });
+    }, sinks);
   }
 
   // ── Case 2: Plain XML file ────────────────────────────────────────────────
@@ -453,12 +573,12 @@ export async function parseAppleExport(file, onProgress = () => {}) {
     extracted = await streamPlainXml(file, (bytes, found) => {
       const pct = totalSize ? Math.min(55, Math.round((bytes / totalSize) * 55)) : 0;
       onProgress(15 + pct, `Scanning XML… ${found} workouts found`);
-    });
+    }, sinks);
   }
 
   if (!extracted) {
     onProgress(100, 'Unsupported Apple Health file');
-    return { activities, summaries };
+    return { activities, summaries, health: emptyHealth() };
   }
 
   const { workouts: workoutStrings, summaries: summaryTags } = extracted;
@@ -517,7 +637,7 @@ export async function parseAppleExport(file, onProgress = () => {}) {
   summaries.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
   onProgress(100, `Loaded ${activities.length} Apple Health activities`);
-  return { activities, summaries };
+  return { activities, summaries, health: collector.finish() };
 }
 
 /**

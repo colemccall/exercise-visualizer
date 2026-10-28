@@ -20,7 +20,9 @@
  */
 
 const DB_NAME = 'fitness-visualizer';
-const DB_VERSION = 1;
+// v2 adds the `plan` store (profile, goals, scenarios, weights, food log, Apple body data).
+// The upgrade only *adds* stores, so a user's saved activities are never touched.
+const DB_VERSION = 2;
 const SCHEMA = 2;
 /** Bumped when parsers start capturing more fields; saved data from an older parser still loads but lacks them. */
 export const MODEL = 3; // bump when the activity model changes shape; older data is discarded
@@ -35,10 +37,12 @@ function openDb() {
     try { req = indexedDB.open(DB_NAME, DB_VERSION); } catch { return resolve(null); }
     req.onupgradeneeded = () => {
       const db = req.result;
-      db.createObjectStore('activities', { keyPath: 'id' });
-      db.createObjectStore('summaries', { keyPath: 'date' });
-      db.createObjectStore('routes', { keyPath: 'id' });
-      db.createObjectStore('meta', { keyPath: 'key' });
+      const ensure = (name, keyPath) => { if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath }); };
+      ensure('activities', 'id');
+      ensure('summaries', 'date');
+      ensure('routes', 'id');
+      ensure('meta', 'key');
+      ensure('plan', 'key');
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => resolve(null);
@@ -225,11 +229,47 @@ export async function clearAll() {
   const db = await openDb();
   if (!db) return false;
   try {
-    const tx = db.transaction(['activities', 'summaries', 'routes', 'meta'], 'readwrite');
-    for (const name of ['activities', 'summaries', 'routes', 'meta']) tx.objectStore(name).clear();
+    const names = ['activities', 'summaries', 'routes', 'meta', 'plan'].filter(n => db.objectStoreNames.contains(n));
+    const tx = db.transaction(names, 'readwrite');
+    for (const name of names) tx.objectStore(name).clear();
     await txDone(tx);
     return true;
   } catch { return false; }
+}
+
+// ── Plan documents ──────────────────────────────────────────────────────────
+// Small JSON documents keyed by name: profile, goals, scenarios, weights, foodlog,
+// apple_health. Kept apart from activities so editing a plan never rewrites them.
+
+export async function saveDoc(key, value) {
+  const db = await openDb();
+  if (!db) return false;
+  try {
+    const tx = db.transaction('plan', 'readwrite');
+    tx.objectStore('plan').put({ key, value, saved: Date.now() });
+    await txDone(tx);
+    return true;
+  } catch (e) { console.warn('store.saveDoc failed', key, e); return false; }
+}
+
+/** @returns {Promise<{[key:string]: any}>} every saved plan document by key */
+export async function loadDocs() {
+  const db = await openDb();
+  if (!db || !db.objectStoreNames.contains('plan')) return {};
+  try {
+    const rows = await done(db.transaction('plan').objectStore('plan').getAll());
+    return Object.fromEntries(rows.map(r => [r.key, r.value]));
+  } catch { return {}; }
+}
+
+export async function deleteDoc(key) {
+  const db = await openDb();
+  if (!db) return;
+  try {
+    const tx = db.transaction('plan', 'readwrite');
+    tx.objectStore('plan').delete(key);
+    await txDone(tx);
+  } catch { /* best effort */ }
 }
 
 export async function storageEstimate() {

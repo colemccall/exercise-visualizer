@@ -9,6 +9,7 @@
  */
 
 import { inScope, getMode } from './modes.js';
+import { emptyPlan } from './data/plan-store.js';
 
 export const state = {
   /** All activities incl. merged-away secondaries (they carry merged_into). */
@@ -26,6 +27,10 @@ export const state = {
   heatmap: null,
   /** Parser version that produced the saved data (see core/data/store.js MODEL). */
   dataModel: null,
+  /** Nutrition planner: profile, goals, scenarios, weights, food log (core/data/plan-store.js). */
+  plan: emptyPlan(),
+  /** Body and energy data read from an Apple Health export (birth year + sex, weights, height, basal energy, dietary). */
+  health: null,
 };
 
 const listeners = new Map();

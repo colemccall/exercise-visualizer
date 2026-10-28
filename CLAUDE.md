@@ -161,6 +161,27 @@ zero progress is an **open ring**, a day without a summary adds nothing and is r
 progress is capped at the newest data day (`periodBounds`). `monthRings` returns full ring objects (it once returned bare
 percentages, which rendered every day empty). Streaks count back from the newest data day, not today.
 
+## Plan (nutrition, goals, targets)
+
+`src/analysis/health/nutrition.js` is the engine (pure, unit-tested; kg/cm/kcal/m/s internally); `src/views/plan.js` is inputs +
+presentation; `src/core/data/plan-store.js` is the model and persistence (`state.plan`, IndexedDB store `plan`, DB_VERSION 2, which
+only *adds* the store).
+
+- Model: `balance/day = intake − (base burn + exercise)`; weight change/week = balance × 7 / 7700. **Base burn = BMR + non-exercise
+  movement**; with an Apple export both come from the user's own data (median basal energy; daily Move minus that day's workout kcal),
+  else Mifflin–St Jeor × a baseline factor. `planTargets()` solves *required exercise = intake − base − required balance*, then
+  `exerciseTargets()` turns kcal into minutes/sessions/distance using the user's own kcal-per-minute and kcal-per-metre by type.
+- Weight is smoothed by a **time-aware** EWMA (tau 7 days): an entry-count EMA once reported 179 lb for someone whose latest
+  weigh-in was 202 lb. The projection starts *today* from the smoothed weight, not from the last weigh-in.
+- Guardrails are part of the model: no deficit under 18, loss rate capped at 1% of bodyweight/week (warn above 0.75%), intake
+  floor (1200 F / 1500 M), protein 1.6–2.2 g/kg check, "ambitious" flag at >2× recent weekly exercise, and a peak-week conflict when
+  the training plan + deficit leaves too little to eat. Copy says "planning estimates, not medical advice".
+- Apple health inputs (`parsers/apple.js createHealthCollector`): `<Me>` → birth **year** + sex only; BodyMass, Height, Basal energy,
+  Dietary energy/macros. Basal/dietary take the *largest source per day* (no double counting, survives a device change). Active
+  energy is deliberately *not* summed from records (ActivitySummary Move is authoritative). Adds ~4s to parsing a ~900MB export
+  (~8s total in Node). Nothing is applied to the plan until the user presses "Fill from Apple Health".
+- Dates typed by users are parsed by components (`new Date('2026-03-01')` is UTC midnight and shifts a day west of Greenwich).
+
 ## Data flow & persistence
 
 `src/core/data/upload.js parseStaged()` → parse each source → **save raw activities to IndexedDB (before merging;

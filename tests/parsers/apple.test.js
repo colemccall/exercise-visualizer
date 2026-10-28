@@ -1,5 +1,6 @@
 import './fixtures.js';
 import test from 'node:test';
+const near = (a, b, eps) => { if (Math.abs(a - b) > eps) throw new Error(`${a} not within ${eps} of ${b}`); };
 import assert from 'node:assert/strict';
 import { makeZip, namedBuffer, SAMPLE_GPX } from './fixtures.js';
 import { parse, parseApple, parseAppleExport } from '../../src/parsers/apple.js';
@@ -144,7 +145,7 @@ test('ZIP with no export.xml returns empty results', async () => {
   console.warn = () => {};
   try {
     const r = await parseAppleExport(await makeZip({ 'x.txt': 'hi' }));
-    assert.deepEqual(r, { activities: [], summaries: [] });
+    assert.deepEqual(r, { activities: [], summaries: [], health: { me: null, basal_by_day: {}, dietary_by_day: {}, weights: [], height_cm: null } });
   } finally {
     console.warn = warn;
   }
@@ -200,4 +201,78 @@ test('Move-minutes users: appleMoveTime fills the Move ring and is flagged as mi
   assert.equal(summaries[0].move_kcal, 42);
   assert.equal(summaries[0].move_goal, 60);
   assert.equal(summaries[0].move_unit, 'min');
+});
+
+// ── Health records for the nutrition planner ────────────────────────────────
+const ME = `<Me HKCharacteristicTypeIdentifierDateOfBirth="1991-07-14" HKCharacteristicTypeIdentifierBiologicalSex="HKBiologicalSexMale" HKCharacteristicTypeIdentifierBloodType="HKBloodTypeNotSet"/>`;
+const rec = (type, src, unit, start, value) =>
+  ` <Record type="HKQuantityTypeIdentifier${type}" sourceName="${src}" sourceVersion="1" unit="${unit}" creationDate="${start}" startDate="${start}" endDate="${start}" value="${value}"/>`;
+
+function healthXml(records, { me = ME, noise = 0 } = {}) {
+  const parts = ['<?xml version="1.0" encoding="UTF-8"?>\n<HealthData locale="en_US">', me];
+  for (let i = 0; i < noise; i++) parts.push(record(i));
+  parts.push(...records, RUN, '</HealthData>');
+  return parts.join('\n');
+}
+
+test('health: birth YEAR and sex only (never the full date of birth), weight in lb -> kg, height in ft -> cm', async () => {
+  const xml = healthXml([
+    rec('BodyMass', 'Health', 'lb', '2026-01-10 08:00:00 -0500', 187),
+    rec('BodyMass', 'Scale', 'kg', '2026-02-22 08:00:00 -0500', 83.5),
+    rec('Height', 'Health', 'ft', '2026-01-10 08:00:00 -0500', 5.9),
+  ]);
+  const { health } = await parseAppleExport(await zipOf(xml));
+  assert.deepEqual(health.me, { birth_year: 1991, sex: 'male' });
+  assert.equal(JSON.stringify(health).includes('07-14'), false, 'the day and month of birth are not kept');
+  assert.equal(health.weights.length, 2);
+  near(health.weights[0].kg, 84.82, 0.01);                // 187 lb
+  assert.equal(health.weights[1].kg, 83.5);
+  near(health.height_cm, 179.8, 0.1);                     // 5.9 ft
+});
+
+test('health: basal energy is summed per day; duplicate writers are not added together', async () => {
+  const day = (d, h) => `2026-04-${d} ${h}:00:00 -0400`;
+  const xml = healthXml([
+    rec('BasalEnergyBurned', 'Watch', 'Cal', day('01', '01'), 40), rec('BasalEnergyBurned', 'Watch', 'Cal', day('01', '02'), 41),
+    rec('BasalEnergyBurned', 'Watch', 'Cal', day('02', '01'), 50),
+    rec('BasalEnergyBurned', 'Phone', 'Cal', day('02', '01'), 30),        // a second writer for day 2: the larger total wins, not 80
+  ]);
+  const { health } = await parseAppleExport(await zipOf(xml));
+  assert.deepEqual(health.basal_by_day, { '2026-04-01': 81, '2026-04-02': 50 });
+});
+
+test('health: a device change mid-export keeps the days from both devices', async () => {
+  const xml = healthXml([
+    rec('BasalEnergyBurned', 'Old Watch', 'Cal', '2026-04-01 01:00:00 -0400', 1800), rec('BasalEnergyBurned', 'Old Watch', 'Cal', '2026-04-02 01:00:00 -0400', 1810),
+    rec('BasalEnergyBurned', 'New Watch', 'Cal', '2026-04-03 01:00:00 -0400', 1900),
+  ]);
+  const { health } = await parseAppleExport(await zipOf(xml));
+  assert.deepEqual(Object.keys(health.basal_by_day), ['2026-04-01', '2026-04-02', '2026-04-03']);
+});
+
+test('health: dietary energy and macros per day', async () => {
+  const xml = healthXml([
+    rec('DietaryEnergyConsumed', 'MyPlate', 'Cal', '2026-04-03 08:00:00 -0400', 500), rec('DietaryEnergyConsumed', 'MyPlate', 'Cal', '2026-04-03 12:00:00 -0400', 700),
+    rec('DietaryProtein', 'MyPlate', 'g', '2026-04-03 08:00:00 -0400', 30), rec('DietaryProtein', 'MyPlate', 'g', '2026-04-03 12:00:00 -0400', 50),
+    rec('DietaryCarbohydrates', 'MyPlate', 'g', '2026-04-03 12:00:00 -0400', 120),
+    rec('DietaryFatTotal', 'MyPlate', 'g', '2026-04-03 12:00:00 -0400', 40),
+  ]);
+  const { health } = await parseAppleExport(await zipOf(xml));
+  assert.deepEqual(health.dietary_by_day, { '2026-04-03': { kcal: 1200, protein: 80, carbs: 120, fat: 40 } });
+});
+
+test('health: records straddling chunk boundaries are neither lost nor double counted', async () => {
+  // Several hundred KB of noise puts many records across decompression chunk edges.
+  const records = Array.from({ length: 400 }, (_, i) => rec('BasalEnergyBurned', 'Watch', 'Cal', `2026-04-${String(1 + (i % 20)).padStart(2, '0')} ${String(i % 24).padStart(2, '0')}:00:00 -0400`, 1));
+  const xml = healthXml(records, { noise: 3000 });
+  const { health } = await parseAppleExport(await zipOf(xml));
+  const total = Object.values(health.basal_by_day).reduce((a, b) => a + b, 0);
+  assert.equal(total, 400);
+});
+
+test('health: an export with none of it yields empty values, not errors', async () => {
+  const { health } = await parseAppleExport(await zipOf(exportXml([RUN])));
+  assert.deepEqual(health.weights, []);
+  assert.equal(health.height_cm, null);
+  assert.equal(health.me, null);
 });

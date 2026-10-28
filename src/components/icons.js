@@ -13,6 +13,7 @@ const PATHS = {
   charts:  '<path d="M5 20v-9M12 20V4M19 20v-6"/>',
   stats:   '<path d="M5 20v-9M12 20V4M19 20v-6"/>',
   photos:  '<rect x="3.5" y="5.5" width="17" height="13" rx="3"/><circle cx="9" cy="11" r="1.6"/><path d="m4 17 5-4.5 4 3.5 3-2.5 4.5 3.5"/>',
+  plan:    '<path d="M6 21V4"/><path d="M6 5h11l-2.2 3.5L17 12H6"/>',
   profile: '<circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c.8-4 3.6-6 7-6s6.2 2 7 6"/>',
   sun:     '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>',
   moon:    '<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/>',

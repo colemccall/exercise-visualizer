@@ -19,6 +19,10 @@
 - Place names on the Map no longer geocode by default (privacy); they are coordinates until the user opts in.
 - Mode and theme are saved preferences; the default is hybrid + light regardless of OS settings.
 
+**Update (2026-10-28):** folders reorganized into `src/`; Milestone A (rings month fix + cumulative week/month/year rings, richer
+attributes, exact Strava↔Apple merge, filter fixes) and Milestone D (the **Plan** tab: nutrition scenarios, goals, exercise targets) are
+done. Remaining from the approved plan: B (search and explore) and C (map).
+
 **Next:** verify the Photo Tour and video export with real photos and on a phone; test on a physical iPhone; then Phase 2 (below). Weather and street data were ruled out.
 
 ---

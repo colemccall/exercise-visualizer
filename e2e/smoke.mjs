@@ -56,6 +56,9 @@ const stravaZip = await makeZip(files, 'strava.zip');
 const w = (type, start, end, extra = '') =>
   `<Workout workoutActivityType="${type}" duration="20" durationUnit="min" sourceName="Watch" startDate="${start}" endDate="${end}">${extra}</Workout>`;
 const apple = `<?xml version="1.0" encoding="UTF-8"?>\n<HealthData locale="en_US">
+<Me HKCharacteristicTypeIdentifierDateOfBirth="1991-07-14" HKCharacteristicTypeIdentifierBiologicalSex="HKBiologicalSexMale"/>
+ <Record type="HKQuantityTypeIdentifierBodyMass" sourceName="Health" unit="lb" startDate="2026-04-01 08:00:00 -0400" endDate="2026-04-01 08:00:00 -0400" value="198"/>
+ <Record type="HKQuantityTypeIdentifierHeight" sourceName="Health" unit="ft" startDate="2026-01-10 08:00:00 -0500" endDate="2026-01-10 08:00:00 -0500" value="5.9"/>
 ${w('HKWorkoutActivityTypeRunning', '2026-04-10 03:01:00 -0400', '2026-04-10 03:21:00 -0400',
   '<WorkoutStatistics type="HKQuantityTypeIdentifierDistanceWalkingRunning" sum="4.1" unit="km"/><WorkoutStatistics type="HKQuantityTypeIdentifierActiveEnergyBurned" sum="320" unit="Cal"/>')}
 ${w('HKWorkoutActivityTypeYoga', '2026-04-12 08:00:00 -0400', '2026-04-12 08:30:00 -0400')}
@@ -123,7 +126,7 @@ try {
 
   check(await page.evaluate(() => document.body.dataset.mode) === 'hybrid', 'defaults to hybrid mode');
   const tabs = await page.$$eval('#nav-tabs .nav-tab', els => els.map(e => e.dataset.view));
-  check(['today', 'feed', 'map', 'awards', 'charts', 'photos'].every(v => tabs.includes(v)), `hybrid nav: ${tabs.join(', ')}`);
+  check(['today', 'feed', 'map', 'plan', 'charts', 'photos'].every(v => tabs.includes(v)), `hybrid nav: ${tabs.join(', ')}`);
 
   // The Apple run merges into the Strava run: 6 + yoga = 7 visible workouts
   await page.click('#nav-tabs [data-view="feed"]');
@@ -180,6 +183,38 @@ try {
   const restored = await page.$$eval('#view-feed .feed-card', c => c.length);
   check(narrowed < restored && restored === 7, `Feed shows a date filter set on Stats and "Clear all" removes it (${narrowed} -> ${restored})`);
 
+  // Plan: import from Apple Health, set a goal, and the targets respond to what you eat
+  await page.click('#nav-tabs [data-view="plan"]');
+  await page.waitForSelector('#view-plan.active #btn-import-apple');
+  await page.click('#btn-import-apple');
+  await page.waitForSelector('#p-birth');
+  check(await page.$eval('#p-birth', e => e.value) === '1991', 'Plan fills birth YEAR from Apple Health');
+  check(await page.$eval('#p-sex', e => e.value) === 'male', 'Plan fills sex from Apple Health');
+  check(/^\s*198\.\d lb/.test(await page.$eval('.weight-now strong', e => e.textContent)), 'Plan fills the weigh-in from Apple Health (198 lb)');
+  await page.check('#g-lose-on');
+  await page.waitForSelector('#g-lose-target');
+  await page.fill('#g-lose-target', '180');
+  await page.dispatchEvent('#g-lose-target', 'input');
+  await page.fill('#s-kcal-num', '2000');
+  await page.dispatchEvent('#s-kcal-num', 'input');
+  await page.waitForSelector('.hero-line strong');
+  const exAt = async () => parseInt((await page.$eval('.plan-tiles .act-stat-val', e => e.textContent)).replace(/[^0-9]/g, ''), 10);
+  const at2000 = await exAt();
+  await page.fill('#s-kcal-num', '2600');
+  await page.dispatchEvent('#s-kcal-num', 'input');
+  await page.waitForTimeout(250);
+  const at2600 = await exAt();
+  check(at2600 > at2000 + 400, `eating more raises the exercise target (2000 kcal -> ${at2000}/week, 2600 kcal -> ${at2600}/week)`);
+  await page.click('#scn-dup');
+  await page.waitForSelector('.cmp-table');
+  check(await page.$$eval('.cmp-table tbody tr', r => r.length) === 2, 'two scenarios are compared side by side');
+  await page.reload();
+  await page.waitForSelector('#app-nav.visible');
+  await page.evaluate(() => { location.hash = '#/plan'; });
+  await page.waitForSelector('#g-lose-on');
+  check(await page.$eval('#g-lose-on', e => e.checked) && await page.$eval('#p-birth', e => e.value) === '1991', 'plan survives a reload');
+  await page.evaluate(() => { location.hash = '#/feed'; });
+
   // Modes
   for (const mode of ['apple', 'strava', 'hybrid']) {
     await page.click(`#mode-switch [data-mode="${mode}"]`);
@@ -204,7 +239,7 @@ try {
 
   // Phone: no horizontal overflow
   await page.setViewportSize({ width: 390, height: 800 });
-  for (const v of ['today', 'feed', 'map', 'awards', 'charts']) {
+  for (const v of ['today', 'feed', 'map', 'awards', 'plan', 'charts']) {
     await page.evaluate((h) => { location.hash = `#/${h}`; }, v);
     await page.waitForTimeout(700);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);

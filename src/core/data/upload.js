@@ -16,6 +16,7 @@ import { escapeHtml } from '../lib/util.js';
 import { showProgress, hideProgress, showToast, setUploadError } from '../lib/ui.js';
 import { ensureRoutes } from './routes.js';
 import * as store from './store.js';
+import { loadPlan, saveHealth, emptyPlan } from './plan-store.js';
 
 /** Staged (not yet parsed) files per source */
 export const staged = { strava: [], apple: [], photos: [] };
@@ -122,12 +123,14 @@ export async function parseStaged() {
 
     let fresh = [];
     let summaries = null;
+    let health = null;
     try {
       for (const file of staged[source]) {
         if (source === 'apple') {
           const out = await parseAppleExport(file, onProgress);
           fresh = fresh.concat(out.activities);
           summaries = (summaries || []).concat(out.summaries);
+          health = out.health || health;
         } else {
           fresh = fresh.concat(await parseStrava(file, onProgress));
         }
@@ -150,6 +153,10 @@ export async function parseStaged() {
       const byDay = new Map(summaries.map(s => [s.date, s]));
       state.summaries = [...byDay.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
       await store.saveSummaries(state.summaries);
+    }
+    if (health && (health.weights.length || health.basal_by_day && Object.keys(health.basal_by_day).length || health.me)) {
+      state.health = health;
+      await saveHealth(health);
     }
     loaded += fresh.length;
 
@@ -208,6 +215,9 @@ export async function restoreSaved() {
   state.activities = activities;
   state.summaries = summaries;
   state.dataModel = model;
+  const saved = await loadPlan();
+  state.plan = saved.plan;
+  state.health = saved.health;
   rebuildMerge();
   return true;
 }
@@ -247,5 +257,7 @@ export async function deleteAllData() {
   state.activities = []; state.summaries = []; state.photos = [];
   state.photoMatch = { matched: 0, unmatched: 0, activitiesWithPhotos: [] };
   state.has = { strava: false, apple: false };
+  state.plan = emptyPlan();
+  state.health = null;
   for (const s of ALL_ZONES) staged[s] = [];
 }
