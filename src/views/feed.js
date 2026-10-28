@@ -11,7 +11,8 @@
 
 import { state, filtered, scoped, emit, dataAnchor, isFiltered, describeFilters, clearFilter, clearFilters } from '../core/state.js';
 import { getMode } from '../core/modes.js';
-import { hrefFor } from '../core/router.js';
+import { hrefFor, navigate } from '../core/router.js';
+import { formatQuery } from '../core/lib/query.js';
 import { escapeHtml, debounce } from '../core/lib/util.js';
 import {
   formatDistance, formatDuration, formatMovingTime, formatElevation, formatEffort, formatCalories,
@@ -143,6 +144,13 @@ function build(root) {
       <label class="sr-only" for="feed-search">Search activities</label>
       <input type="search" id="feed-search" placeholder="Search activities…" autocomplete="off" />
       <div class="chips" id="feed-chips" role="group" aria-label="Filter by type"></div>
+      <label class="sr-only" for="feed-sort">Sort activities</label>
+      <select id="feed-sort" class="feed-sort">
+        <option value="">Newest first</option><option value="date:asc">Oldest first</option>
+        <option value="dist:desc">Longest distance</option><option value="dur:desc">Longest time</option>
+        <option value="elev:desc">Most climbing</option><option value="pace:asc">Fastest pace</option>
+      </select>
+      <button type="button" class="bs-btn bs-btn-secondary" id="feed-table">Table view</button>
     </div>
     <div class="active-filters" id="feed-active" aria-live="polite"></div>
     <div class="feed-layout">
@@ -157,9 +165,15 @@ function build(root) {
     state.filters.search = e.target.value;
     redraw();
   });
+  root.querySelector('#feed-sort').addEventListener('change', (e) => {
+    const [key, dir] = e.target.value.split(':');
+    state.filters.sort = key ? { key, dir } : null;
+    shown = PAGE; emit('filters');
+  });
   root.addEventListener('click', (e) => {
+    if (e.target.closest('#feed-table')) navigate('explore', null, { query: formatQuery(state.filters) });
     const chip = e.target.closest('[data-chip]');
-    if (chip) { state.filters.type = chip.dataset.chip; shown = PAGE; emit('filters'); }
+    if (chip) { state.filters.type = chip.dataset.chip; state.filters.types = []; shown = PAGE; emit('filters'); }
     if (e.target.closest('#feed-more')) { shown += PAGE; renderFeed(); }
     const rm = e.target.closest('[data-remove-filter]');
     if (rm) { clearFilter(rm.dataset.removeFilter); shown = PAGE; emit('filters'); }
@@ -184,13 +198,16 @@ export function renderFeed() {
     ? `${all.length.toLocaleString()} activities`
     : `${list.length.toLocaleString()} of ${all.length.toLocaleString()} activities`;
 
+  const sortSel = root.querySelector('#feed-sort');
+  if (sortSel) sortSel.value = state.filters.sort ? `${state.filters.sort.key}:${state.filters.sort.dir}` : '';
   const search = root.querySelector('#feed-search');
   if (document.activeElement !== search) search.value = state.filters.search;
 
   // Type chips: only the types you actually have.
+  const activeType = state.filters.types.length === 1 ? state.filters.types[0] : state.filters.types.length ? null : state.filters.type;
   const types = ['All', ...['Run', 'Ride', 'Walk', 'Hike', 'Swim', 'Other'].filter(t => all.some(a => a.type === t))];
   root.querySelector('#feed-chips').innerHTML = types.map(t => `
-    <button type="button" class="chip" data-chip="${t}" aria-pressed="${state.filters.type === t}">${t}</button>`).join('');
+    <button type="button" class="chip" data-chip="${t}" aria-pressed="${activeType === t}">${t}</button>`).join('');
 
   // Every active filter is visible and removable, wherever it was set (Stats, Map…).
   const active = describeFilters();
@@ -208,10 +225,15 @@ export function renderFeed() {
       </div>`;
   } else {
     const visible = list.slice(0, shown);
-    const groups = groupByMonth(visible);
+    const sort = state.filters.sort;
+    // Months only make sense when the list runs through time; any other sort is one flat list.
+    const groups = !sort || sort.key === 'date'
+      ? groupByMonth(visible)
+      : [{ key: '', label: { dist: 'Longest distance first', dur: 'Longest time first', elev: 'Most climbing first', pace: 'Fastest pace first', hr: 'Highest heart rate first', name: 'A to Z' }[sort.key] || 'Sorted',
+          items: visible, totals: { distance_m: visible.reduce((s, a) => s + (a.distance_m || 0), 0), moving_s: visible.reduce((s, a) => s + (a.moving_s || a.duration_s || 0), 0) } }];
     listEl.innerHTML = groups.map(g => `
       <section class="feed-group" aria-label="${escapeHtml(g.label)}">
-        <h2 class="feed-month">${escapeHtml(g.label)}
+        <h2 class="feed-month">${g.key ? `<button type="button" class="month-drill" data-drill="month:${g.key}" title="Show only ${escapeHtml(g.label)}">${escapeHtml(g.label)}</button>` : escapeHtml(g.label)}
           <span>${g.items.length} · ${escapeHtml(formatDistance(g.totals.distance_m))} · ${escapeHtml(formatMovingTime(g.totals.moving_s))}</span>
         </h2>
         ${g.items.map(a => cardHtml(a, modeId)).join('')}

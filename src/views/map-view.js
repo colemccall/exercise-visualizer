@@ -8,19 +8,21 @@
  * detail page. Selection is a pointer at one activity, independent of filters.
  */
 
-import { state, scoped, filtered, emit, isFiltered } from '../core/state.js';
+import { state, scoped, filtered, emit, isFiltered, clearFilters, sortActivities } from '../core/state.js';
 import { navigate } from '../core/router.js';
 import { escapeHtml, MONTH_SHORT, safeStorage } from '../core/lib/util.js';
 import {
   formatDistance, formatDuration, formatElevation, formatEffort, formatDate,
 } from '../core/lib/format.js';
 import { syncNavHeight, showToast } from '../core/lib/ui.js';
-import { setCollapsed } from '../core/lib/collapse.js';
+import { setCollapsed, isCollapsed } from '../core/lib/collapse.js';
 import {
   initHeatmap, renderHeatmap, routeStyle, styleColor, setHeatStyle, getHeatStyle,
   getFrequencyRamp, getFrequencyRange, raiseHotRoutes, setRouteHandlers, highlightRoute,
   clearHighlight, zoomToRoute, _renderedPolylines, _renderedActivities, TYPE_COLORS,
+  computeFrequency, setHeatmapBasemap,
 } from '../map/heatmap.js';
+import { getBasemap, setBasemap } from '../map/tiles.js';
 import { saveRoutes, savedRouteIds } from '../core/data/store.js';
 
 /** @type {object|null} Pinned route, if any */
@@ -28,6 +30,11 @@ let selectedRoute = null;
 /** Signature of the activity set currently drawn, to know when a full redraw is due. */
 let drawnKey = '';
 let renderToken = 0;
+/** Activities inside the box drawn with "Select area" (null = no area). */
+let areaIds = null;
+let areaRect = null;
+let areaMode = false;
+let areaStart = null;
 
 const TYPE_ORDER = ['Run', 'Ride', 'Walk', 'Hike', 'Swim', 'Other'];
 
@@ -44,6 +51,9 @@ export async function renderMapView() {
     const center = await getInitialMapCenter();
     state.heatmap = initHeatmap(el, center ? { center, zoom: 11 } : {});
     state.heatmap.on('click', clearRouteSelection);
+    bindAreaDrag(state.heatmap);
+    const bm = document.getElementById('map-basemap');
+    if (bm) bm.value = getBasemap();
   }
 
   const visible = scoped();
@@ -98,10 +108,23 @@ async function getInitialMapCenter() {
   return null;
 }
 
-function applyHeatmapFilter(list) {
-  if (!_renderedPolylines.length) { renderMapLegend(); return; }
+/** Ids of the routes that pass the filters (and the drawn area, if any). */
+function matchingIds(list = filtered()) {
   const ids = new Set(list.map(a => a.id));
-  const hasFilter = isFiltered();
+  if (areaIds) for (const id of [...ids]) if (!areaIds.has(id)) ids.delete(id);
+  return ids;
+}
+
+function applyHeatmapFilter(list) {
+  if (!_renderedPolylines.length) { renderMapLegend(); renderMapFilters(); renderActivitiesList(); return; }
+  const ids = matchingIds(list);
+  const hasFilter = isFiltered() || !!areaIds;
+
+  // Frequency is "how many activities share this road": measured over the activities
+  // you're looking at, so filtering to 2024 shows 2024's habits, not all-time.
+  if (getHeatStyle() === 'frequency') {
+    computeFrequency(hasFilter ? _renderedActivities.filter(a => ids.has(a.id)) : _renderedActivities);
+  }
 
   for (let i = 0; i < _renderedPolylines.length; i++) {
     const act = _renderedActivities[i];
@@ -113,6 +136,8 @@ function applyHeatmapFilter(list) {
   }
   raiseHotRoutes();
   renderMapLegend();
+  renderMapFilters();
+  renderActivitiesList();
 }
 
 export function restyleMapForTheme() {
@@ -168,7 +193,8 @@ function renderRouteCard(activity, { pinned }) {
 
   els.actions.hidden = !pinned;
   els.close.hidden = !pinned;
-  els.hint.textContent = pinned ? 'Esc or the map background clears this' : 'Click the route to pin it';
+  const touch = window.matchMedia?.('(pointer: coarse)').matches;
+  els.hint.textContent = pinned ? (touch ? 'Tap the map background to clear' : 'Esc or the map background clears this') : (touch ? 'Tap a route to pin it' : 'Click the route to pin it');
 }
 
 function hideRouteCard() {
@@ -189,16 +215,49 @@ function previewRoute(activity, entering) {
   }
 }
 
-function selectRoute(activity) {
+function selectRoute(activity, latlng) {
   selectedRoute = activity;
   highlightRoute(activity, { preview: false });
   renderRouteCard(activity, { pinned: true });
+  renderRoutePick(activity, latlng);
+  renderActivitiesList();
+}
+
+/** Every drawn route under a tap/click, so a busy junction doesn't hide all but the top line. */
+function routesAt(latlng) {
+  if (!state.heatmap || !latlng) return [];
+  const pt = state.heatmap.latLngToLayerPoint(latlng);
+  const ids = matchingIds();
+  const out = [];
+  for (let i = 0; i < _renderedPolylines.length; i++) {
+    const a = _renderedActivities[i], p = _renderedPolylines[i];
+    if (!a || !p || !ids.has(a.id)) continue;
+    try { if (p._containsPoint && p._containsPoint(pt)) out.push(a); } catch { /* not drawn yet */ }
+  }
+  return out;
+}
+
+function renderRoutePick(activity, latlng) {
+  const box = document.getElementById('route-card-pick');
+  if (!box) return;
+  const others = routesAt(latlng).filter(a => a.id !== activity.id).sort((a, b) => b.date - a.date).slice(0, 8);
+  box.hidden = !others.length;
+  box.innerHTML = others.length ? `<div class="route-pick-title">${others.length} other route${others.length === 1 ? '' : 's'} here</div>` +
+    others.map(a => `<button type="button" data-pick="${escapeHtml(a.id)}">${escapeHtml(a.name)} · ${escapeHtml(formatDate(a.date, { month: 'short', day: 'numeric', year: 'numeric' }))}</button>`).join('') : '';
+  box.onclick = (e) => {
+    const b = e.target.closest('[data-pick]');
+    const a = b && _renderedActivities.find(x => x.id === b.dataset.pick);
+    if (a) selectRoute(a, null);
+  };
 }
 
 export function clearRouteSelection() {
   selectedRoute = null;
   clearHighlight();
   hideRouteCard();
+  const pick = document.getElementById('route-card-pick');
+  if (pick) pick.hidden = true;
+  renderActivitiesList();
 }
 
 export const hasRouteSelection = () => !!selectedRoute;
@@ -206,9 +265,9 @@ export const hasRouteSelection = () => !!selectedRoute;
 function initRouteInteraction() {
   setRouteHandlers({
     onHover: previewRoute,
-    onSelect: (activity) => {
+    onSelect: (activity, e) => {
       if (selectedRoute && selectedRoute.id === activity.id) clearRouteSelection();
-      else selectRoute(activity);
+      else selectRoute(activity, e?.latlng);
     },
   });
   document.getElementById('btn-route-clear')?.addEventListener('click', clearRouteSelection);
@@ -265,13 +324,17 @@ function renderMapLegend() {
     return;
   }
 
-  // Only list the types actually on the map, so the legend stays honest.
-  const present = new Set(_renderedActivities.map(a => a.type));
-  const items = TYPE_ORDER.filter(t => present.has(t));
+  // Only list the types actually on the map, so the legend stays honest; each is a
+  // button that filters to that type (and back), with the number of routes.
+  const counts = {};
+  for (const a of _renderedActivities) counts[a.type] = (counts[a.type] || 0) + 1;
+  const items = TYPE_ORDER.filter(t => counts[t]);
+  const active = state.filters.types.length === 1 ? state.filters.types[0] : state.filters.type;
   document.getElementById('map-legend-type-items').innerHTML = (items.length ? items : TYPE_ORDER).map(t => `
-    <span class="map-legend-item">
+    <button type="button" class="map-legend-item" data-legend-type="${t}" aria-pressed="${active === t}" title="Show only ${t} routes">
       <span class="map-legend-swatch" style="background:${TYPE_COLORS[t] || TYPE_COLORS.Other}"></span>${t}
-    </span>`).join('');
+      <span class="map-legend-count">${counts[t] || 0}</span>
+    </button>`).join('');
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -364,40 +427,58 @@ function renderMonthsTab() {
 
 // ── Timelapse ────────────────────────────────────────────────────────────────
 
-let tlIdx = 0;
+let tlIdx = 0;          // how many routes are currently revealed
 let tlTimer = null;
-let tlRoutes = [];
+let tlRoutes = [];      // indices into _renderedActivities, oldest first (only routes passing the filters)
 
-const tlSortedRoutes = () => _renderedActivities
-  .map((a, i) => ({ i, date: a.date }))
-  .filter(x => x.date)
-  .sort((a, b) => a.date - b.date)
-  .map(x => x.i);
+const tlSortedRoutes = () => {
+  const ids = matchingIds();
+  return _renderedActivities
+    .map((a, i) => ({ i, date: a.date, id: a.id }))
+    .filter(x => x.date && ids.has(x.id))
+    .sort((a, b) => a.date - b.date)
+    .map(x => x.i);
+};
 
-function tlUpdateUI(step) {
+const normalStyle = (act, poly) => poly.setStyle({ color: styleColor(act, state.dark), ...routeStyle(state.dark, act) });
+
+function tlUpdateUI(shown) {
   const bar = document.getElementById('tl-progress-bar');
   const label = document.getElementById('tl-date-label');
   const count = document.getElementById('tl-count-label');
+  const scrub = document.getElementById('tl-scrub');
   if (!bar) return;
-  bar.style.width = `${tlRoutes.length > 1 ? (step / (tlRoutes.length - 1)) * 100 : 100}%`;
-  const act = _renderedActivities[tlRoutes[step]];
-  if (act && label) label.textContent = formatDate(act.date);
-  if (count) count.textContent = `${step + 1} / ${tlRoutes.length}`;
+  bar.style.width = `${tlRoutes.length > 0 ? (shown / tlRoutes.length) * 100 : 0}%`;
+  const act = _renderedActivities[tlRoutes[Math.max(0, shown - 1)]];
+  if (label) label.textContent = act && shown > 0 ? formatDate(act.date) : 'Press Play, or drag the slider';
+  if (count) count.textContent = tlRoutes.length ? `${shown} / ${tlRoutes.length}` : '';
+  if (scrub) { scrub.max = String(tlRoutes.length); scrub.value = String(shown); }
+}
+
+/** Show the first `n` routes of the sequence at normal strength and hide the rest. */
+function tlShowUpTo(n) {
+  const inSeq = new Set(tlRoutes);
+  tlRoutes.forEach((idx, k) => {
+    const poly = _renderedPolylines[idx], act = _renderedActivities[idx];
+    if (!poly || !act) return;
+    if (k < n) normalStyle(act, poly); else poly.setStyle({ opacity: 0, weight: 2 });
+  });
+  // routes the filters exclude stay faint, as on the static map
+  _renderedPolylines.forEach((poly, idx) => { if (!inSeq.has(idx) && poly) poly.setStyle({ weight: 1, opacity: 0.07 }); });
 }
 
 function tlStep() {
-  if (tlIdx >= tlRoutes.length) { tlStop(); return; }
+  if (tlIdx >= tlRoutes.length) { tlPause(); return; }
   const idx = tlRoutes[tlIdx];
   const poly = _renderedPolylines[idx];
   const act = _renderedActivities[idx];
-  if (!poly || !act) { tlIdx++; tlStep(); return; }
-
-  // Flash in bright, then settle to normal visible opacity
-  poly.setStyle({ color: state.dark ? '#ffffff' : '#111111', weight: 4, opacity: 1 });
-  setTimeout(() => poly.setStyle({ color: styleColor(act, state.dark), ...routeStyle(state.dark, act) }), 300);
-
-  tlUpdateUI(tlIdx);
   tlIdx++;
+  if (poly && act) {
+    // Flash in bright, then settle to normal visible opacity
+    poly.setStyle({ color: state.dark ? '#ffffff' : '#111111', weight: 4, opacity: 1 });
+    setTimeout(() => normalStyle(act, poly), 300);
+  }
+  tlUpdateUI(tlIdx);
   const speed = parseInt(document.getElementById('tl-speed')?.value || '3', 10);
   tlTimer = setTimeout(tlStep, Math.max(40, 500 / speed));
 }
@@ -406,16 +487,16 @@ function tlPrepare() {
   if (_renderedActivities.length === 0) { showToast('Load activities with routes first'); return false; }
   clearRouteSelection();
   tlRoutes = tlSortedRoutes();
-  if (!tlRoutes.length) { showToast('No routable activities to animate'); return false; }
-  for (const p of _renderedPolylines) p?.setStyle({ opacity: 0, weight: 2 });
+  if (!tlRoutes.length) { showToast('No routes match the current filters'); return false; }
   tlIdx = 0;
+  tlShowUpTo(0);
   tlUpdateUI(0);
   return true;
 }
 
 function tlPlay() {
   if (tlTimer) return;
-  if (tlIdx === 0 || tlIdx >= tlRoutes.length) if (!tlPrepare()) return;
+  if (!tlRoutes.length || tlIdx >= tlRoutes.length) if (!tlPrepare()) return;
   const btn = document.getElementById('tl-play-btn');
   if (btn) btn.innerHTML = '&#9646;&#9646; Pause';
   tlStep();
@@ -428,6 +509,15 @@ function tlPause() {
   if (btn) btn.innerHTML = '&#9654; Play';
 }
 
+/** Jump to "n routes revealed" (scrubber, step buttons). */
+function tlSeek(n) {
+  tlPause();
+  if (!tlRoutes.length && !tlPrepare()) return;
+  tlIdx = Math.max(0, Math.min(tlRoutes.length, n));
+  tlShowUpTo(tlIdx);
+  tlUpdateUI(tlIdx);
+}
+
 export function tlStop() {
   clearTimeout(tlTimer);
   tlTimer = null;
@@ -438,13 +528,12 @@ export function tlStop() {
   const bar = document.getElementById('tl-progress-bar');
   if (bar) bar.style.width = '0%';
   const label = document.getElementById('tl-date-label');
-  if (label) label.textContent = 'Press Play to animate routes chronologically';
+  if (label) label.textContent = 'Press Play, or drag the slider';
   const count = document.getElementById('tl-count-label');
   if (count) count.textContent = '';
-  for (let i = 0; i < _renderedPolylines.length; i++) {
-    const act = _renderedActivities[i];
-    if (act) _renderedPolylines[i]?.setStyle({ color: styleColor(act, state.dark), ...routeStyle(state.dark, act) });
-  }
+  const scrub = document.getElementById('tl-scrub');
+  if (scrub) { scrub.max = '0'; scrub.value = '0'; }
+  applyHeatmapFilter(filtered());
 }
 
 // ── Most visited places ──────────────────────────────────────────────────────
@@ -534,12 +623,219 @@ async function renderLocationsPanel() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// MAP FILTER BAR (same filters as the search box)
+// ═════════════════════════════════════════════════════════════════════════════
+
+function renderMapFilters() {
+  const chips = document.getElementById('map-chips');
+  if (!chips) return;
+  const all = scoped();
+  const types = ['All', ...TYPE_ORDER.filter(t => all.some(a => a.type === t))];
+  const active = state.filters.types.length === 1 ? state.filters.types[0] : state.filters.types.length ? null : state.filters.type;
+  chips.innerHTML = types.map(t => `<button type="button" class="chip" data-map-type="${t}" aria-pressed="${active === t}">${t}</button>`).join('');
+
+  const yearSel = document.getElementById('map-year');
+  if (yearSel) {
+    const years = [...new Set(all.map(a => a.date.getFullYear()))].sort((a, b) => b - a);
+    yearSel.innerHTML = '<option value="">All years</option>' + years.map(y => `<option value="${y}" ${state.filters.year === y ? 'selected' : ''}>${y}</option>`).join('');
+  }
+
+  const ids = matchingIds();
+  const shown = _renderedActivities.filter(a => ids.has(a.id)).length;
+  const count = document.getElementById('map-count');
+  if (count) count.textContent = _renderedActivities.length ? `${shown.toLocaleString()} of ${_renderedActivities.length.toLocaleString()} routes` : '';
+  const clear = document.getElementById('map-clear');
+  if (clear) clear.hidden = !(isFiltered() || areaIds);
+}
+
+/** Zoom to the routes currently shown (sampling points: this only needs a bounding box). */
+function fitToFiltered() {
+  if (!state.heatmap) return;
+  const ids = matchingIds();
+  const pts = [];
+  for (const a of _renderedActivities) {
+    if (!ids.has(a.id) || !a.route_points) continue;
+    for (let k = 0; k < a.route_points.length; k += 8) {
+      const p = a.route_points[k];
+      if (p.lat !== null && p.lng !== null) pts.push([p.lat, p.lng]);
+    }
+  }
+  if (pts.length < 2) { showToast('No routes match the current filters.'); return; }
+  try { state.heatmap.fitBounds(L.latLngBounds(pts), { padding: [40, 40], maxZoom: 15 }); } catch { /* degenerate bounds */ }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ACTIVITIES LIST (side panel): the routes on the map, as a list
+// ═════════════════════════════════════════════════════════════════════════════
+
+const LIST_LIMIT = 150;
+
+function renderActivitiesList() {
+  const box = document.getElementById('map-activities');
+  if (!box) return;
+  const ids = matchingIds();
+  const items = sortActivities(_renderedActivities.filter(a => ids.has(a.id)), state.filters.sort);
+
+  const summary = document.getElementById('map-area-summary');
+  if (summary) {
+    summary.hidden = !areaIds;
+    if (areaIds) {
+      const dist = items.reduce((t, a) => t + (a.distance_m || 0), 0);
+      const secs = items.reduce((t, a) => t + (a.moving_s || a.duration_s || 0), 0);
+      summary.innerHTML = `<span><strong>${items.length.toLocaleString()}</strong> in this area · ${escapeHtml(formatDistance(dist))} · ${escapeHtml(formatDuration(secs))}</span><button type="button" class="map-mini-btn" id="area-clear-btn">Clear area</button>`;
+    }
+  }
+
+  if (!_renderedActivities.length) { box.innerHTML = '<div class="muted-note">Routes appear here once they load.</div>'; return; }
+  if (!items.length) { box.innerHTML = '<div class="muted-note">No routes match the current filters.</div>'; return; }
+  box.innerHTML = items.slice(0, LIST_LIMIT).map(a => `
+    <button type="button" class="act-row-btn ${selectedRoute && selectedRoute.id === a.id ? 'sel' : ''}" data-act="${escapeHtml(a.id)}">
+      <span class="dot" style="background:${TYPE_COLORS[a.type] || TYPE_COLORS.Other}"></span>
+      <span><span class="nm">${escapeHtml(a.name)}</span><span class="sub">${escapeHtml(formatDate(a.date, { month: 'short', day: 'numeric', year: 'numeric' }))}</span></span>
+      <span class="val">${escapeHtml(formatDistance(a.distance_m))}</span>
+    </button>`).join('') + (items.length > LIST_LIMIT ? `<div class="map-list-more">Showing ${LIST_LIMIT} of ${items.length.toLocaleString()}. Filter to narrow it down.</div>` : '');
+}
+
+function initActivitiesList() {
+  const box = document.getElementById('map-activities');
+  const find = (el) => { const b = el.closest('[data-act]'); return b && _renderedActivities.find(a => a.id === b.dataset.act); };
+  box?.addEventListener('mouseover', (e) => { const a = find(e.target); if (a) previewRoute(a, true); });
+  box?.addEventListener('mouseout', (e) => { const a = find(e.target); if (a) previewRoute(a, false); });
+  box?.addEventListener('focusin', (e) => { const a = find(e.target); if (a) previewRoute(a, true); });
+  box?.addEventListener('focusout', (e) => { const a = find(e.target); if (a) previewRoute(a, false); });
+  box?.addEventListener('click', (e) => {
+    const a = find(e.target);
+    if (a) { selectRoute(a, null); zoomToRoute(a); }
+  });
+  document.getElementById('map-area-summary')?.addEventListener('click', (e) => { if (e.target.closest('#area-clear-btn')) clearArea(); });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SELECT AREA: draw a box, see the activities that pass through it
+// ═════════════════════════════════════════════════════════════════════════════
+
+function bboxOf(a) {
+  if (a._bbox) return a._bbox;
+  let s2 = 90, w = 180, n = -90, e2 = -180;
+  for (const p of a.route_points || []) {
+    if (p.lat === null || p.lng === null) continue;
+    if (p.lat < s2) s2 = p.lat; if (p.lat > n) n = p.lat;
+    if (p.lng < w) w = p.lng; if (p.lng > e2) e2 = p.lng;
+  }
+  return (a._bbox = { s: s2, w, n, e: e2 });
+}
+
+/** Activities with a route point inside `bounds` (box test first, then every 3rd point). */
+function activitiesInBounds(bounds) {
+  const south = bounds.getSouth(), north = bounds.getNorth(), west = bounds.getWest(), east = bounds.getEast();
+  const ids = new Set();
+  for (const a of _renderedActivities) {
+    if (!a.route_points?.length) continue;
+    const b = bboxOf(a);
+    if (b.n < south || b.s > north || b.e < west || b.w > east) continue;
+    for (let k = 0; k < a.route_points.length; k += 3) {
+      const p = a.route_points[k];
+      if (p.lat !== null && p.lat >= south && p.lat <= north && p.lng >= west && p.lng <= east) { ids.add(a.id); break; }
+    }
+  }
+  return ids;
+}
+
+function setAreaMode(on) {
+  areaMode = on;
+  const map = state.heatmap;
+  document.getElementById('btn-map-area')?.setAttribute('aria-pressed', String(on));
+  const lbl = document.querySelector('#btn-map-area .map-icon-label');
+  if (lbl) lbl.textContent = on ? 'Drag a box…' : 'Select area';
+  if (!map) return;
+  map.getContainer().classList.toggle('area-select', on);
+  if (on) map.dragging.disable(); else map.dragging.enable();
+}
+
+function clearArea() {
+  areaIds = null;
+  if (areaRect && state.heatmap) { state.heatmap.removeLayer(areaRect); areaRect = null; }
+  setAreaMode(false);
+  applyHeatmapFilter(filtered());
+}
+
+function initAreaSelect() {
+  document.getElementById('btn-map-area')?.addEventListener('click', () => {
+    if (areaIds) { clearArea(); return; }
+    setAreaMode(!areaMode);
+  });
+}
+
+/** Called once the Leaflet map exists: pointer events work for mouse, pen and touch. */
+function bindAreaDrag(map) {
+  const el = map.getContainer();
+  el.addEventListener('pointerdown', (e) => {
+    if (!areaMode || e.button > 0) return;
+    e.preventDefault();
+    areaStart = map.mouseEventToLatLng(e);
+    if (areaRect) { map.removeLayer(areaRect); areaRect = null; }
+    areaRect = L.rectangle([areaStart, areaStart], { className: 'area-rect', interactive: false, color: '#c2410c', weight: 2, dashArray: '6 4', fillOpacity: 0.12 }).addTo(map);
+    el.setPointerCapture?.(e.pointerId);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!areaMode || !areaStart || !areaRect) return;
+    areaRect.setBounds(L.latLngBounds(areaStart, map.mouseEventToLatLng(e)));
+  });
+  const finish = (e) => {
+    if (!areaMode || !areaStart || !areaRect) return;
+    const bounds = areaRect.getBounds();
+    const sw = map.latLngToContainerPoint(bounds.getSouthWest()), ne = map.latLngToContainerPoint(bounds.getNorthEast());
+    areaStart = null;
+    el.releasePointerCapture?.(e.pointerId);
+    if (Math.abs(sw.x - ne.x) < 12 || Math.abs(sw.y - ne.y) < 12) { map.removeLayer(areaRect); areaRect = null; return; }   // a click, not a box
+    areaIds = activitiesInBounds(bounds);
+    setAreaMode(false);
+    document.querySelector('.etab[data-tab="activities"]')?.click();
+    applyHeatmapFilter(filtered());
+    if (!areaIds.size) showToast('No routes pass through that box.');
+  };
+  el.addEventListener('pointerup', finish);
+  el.addEventListener('pointercancel', finish);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // WIRING
 // ═════════════════════════════════════════════════════════════════════════════
 
 export function initMapView() {
   initRouteInteraction();
   initExplorePanel();
+  initActivitiesList();
+  initAreaSelect();
+
+  // Filters on the map
+  document.getElementById('map-filters')?.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-map-type]');
+    if (t) { state.filters.type = t.dataset.mapType; state.filters.types = []; emit('filters'); }
+    if (e.target.closest('#map-fit')) fitToFiltered();
+    if (e.target.closest('#map-clear')) { clearFilters(); if (areaIds) clearArea(); emit('filters'); }
+  });
+  document.getElementById('map-year')?.addEventListener('change', (e) => { state.filters.year = e.target.value ? +e.target.value : null; emit('filters'); });
+  document.getElementById('map-legend-type-items')?.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-legend-type]');
+    if (!b) return;
+    const cur = state.filters.types.length === 1 ? state.filters.types[0] : state.filters.type;
+    state.filters.type = cur === b.dataset.legendType ? 'All' : b.dataset.legendType;
+    state.filters.types = [];
+    emit('filters');
+  });
+
+  // Basemap + side panel
+  document.getElementById('map-basemap')?.addEventListener('change', (e) => { setBasemap(e.target.value); setHeatmapBasemap(e.target.value); });
+  const tools = document.getElementById('btn-map-tools');
+  const syncTools = () => tools?.setAttribute('aria-pressed', String(!isCollapsed('explore')));
+  syncTools();
+  tools?.addEventListener('click', () => { setCollapsed('explore', !isCollapsed('explore'), invalidateMap); syncTools(); });
+
+  // Timelapse scrubber and step
+  document.getElementById('tl-scrub')?.addEventListener('input', (e) => tlSeek(+e.target.value));
+  document.getElementById('tl-prev')?.addEventListener('click', () => tlSeek(tlIdx - 1));
+  document.getElementById('tl-next')?.addEventListener('click', () => tlSeek(tlIdx + 1));
 
   document.getElementById('btn-map-fullscreen')?.addEventListener('click', toggleMapFullscreen);
 

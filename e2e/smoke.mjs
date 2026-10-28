@@ -83,6 +83,12 @@ mkdirSync(photoDir, { recursive: true });
 const { server, port } = await startServer(0);
 const browser = await chromium.launch({ executablePath: CHROME, headless: true });
 const failures = [];
+/** Poll a condition with page.evaluate (waitForFunction needs eval, which the page's CSP rightly forbids). */
+const until = async (page, fn, timeout = 8000) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeout) { if (await page.evaluate(fn)) return; await page.waitForTimeout(100); }
+  throw new Error('timed out waiting for: ' + String(fn).slice(0, 90));
+};
 const check = (ok, msg) => { if (!ok) { failures.push(msg); console.log('  FAIL:', msg); } else console.log('  ok:', msg); };
 
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
@@ -179,7 +185,7 @@ try {
   await page.waitForSelector('#view-feed.active .active-filters .chip');
   const narrowed = await page.$$eval('#view-feed .feed-card', c => c.length);
   await page.click('#feed-clear-all');
-  await page.waitForFunction(() => document.querySelectorAll('#view-feed .active-filters .chip').length === 0);
+  await until(page, () => document.querySelectorAll('#view-feed .active-filters .chip').length === 0);
   const restored = await page.$$eval('#view-feed .feed-card', c => c.length);
   check(narrowed < restored && restored === 7, `Feed shows a date filter set on Stats and "Clear all" removes it (${narrowed} -> ${restored})`);
 
@@ -212,7 +218,58 @@ try {
   await page.waitForSelector('#app-nav.visible');
   await page.evaluate(() => { location.hash = '#/plan'; });
   await page.waitForSelector('#g-lose-on');
-  check(await page.$eval('#g-lose-on', e => e.checked) && await page.$eval('#p-birth', e => e.value) === '1991', 'plan survives a reload');
+  const after = { lose: await page.$eval('#g-lose-on', e => e.checked), birth: await page.$eval('#p-birth', e => e.value), url: page.url() };
+  check(after.lose && after.birth === '1991', 'plan survives a reload ' + JSON.stringify(after));
+  await page.evaluate(() => { location.hash = '#/feed'; });
+
+  // Search: "/" opens it, the query narrows the feed, shows in the URL, and drives the table
+  await page.evaluate(() => { location.hash = '#/feed'; });
+  await page.waitForSelector('#view-feed.active .feed-card');
+  await page.click('#feed-clear-all').catch(() => {});
+  await page.keyboard.press('/');
+  await page.waitForSelector('#search-bar:not([hidden])');
+  await page.fill('#global-search', 'type:run dist:>3km');
+  await until(page, () => document.querySelectorAll('#view-feed .feed-card').length === 6);
+  check(true, 'typing "type:run dist:>3km" narrows the feed to the 6 runs');
+  check(/q=type:run/.test(page.url()), 'the search is in the URL so it can be bookmarked or shared');
+  check(/6 of 7 activities/.test(await page.$eval('#search-summary', e => e.textContent)), 'the search summary reports what matched');
+  check(await page.$$eval('#view-feed .active-filters .chip.removable', c => c.length) === 2, 'each part of the query shows as a removable chip');
+  await page.fill('#global-search', 'dist:>fast');
+  await page.waitForSelector('.search-err');
+  check(true, 'a bad value is reported inline instead of silently ignored');
+  await page.fill('#global-search', 'type:run');
+  await until(page, () => document.querySelectorAll('#view-feed .feed-card').length === 6);
+  await page.click('#search-table');
+  await page.waitForSelector('#view-explore.active .explore-table');
+  check(await page.$$eval('#view-explore .explore-table tbody tr', r => r.length) === 6, 'the table view lists the same 6 activities');
+  await page.click('#view-explore [data-sort="dist"]');
+  await until(page, () => document.querySelector('#view-explore th[aria-sort="descending"]'));
+  check(true, 'clicking a column sorts the table (aria-sort set)');
+  check(await page.$('#explore-csv:not([disabled])') !== null, 'the current results can be exported as CSV');
+  // drill-down: a by-type row in Stats lands on that type's activities
+  await page.click('#search-clear');
+  await page.evaluate(() => { location.hash = '#/charts'; });
+  await page.waitForSelector('#stats-detail tr.drillable');
+  await page.click('#stats-detail tr.drillable[data-drill="type:run"]');
+  await page.waitForSelector('#view-feed.active .feed-card');
+  check(await page.$$eval('#view-feed .feed-card', c => c.length) === 6, 'clicking a type row in Stats drills down to those 6 runs');
+  await page.click('#search-clear');
+  await page.keyboard.press('Escape');
+
+  // Map: filters, counted legend, basemap, side-panel list, timelapse stepping
+  await page.evaluate(() => { location.hash = '#/map'; });
+  await page.waitForSelector('#map-chips .chip');
+  await until(page, () => /6 of 6 routes/.test(document.getElementById('map-count').textContent), 15000);
+  check(true, 'the map shows a live count of the routes it is drawing (6 of 6)');
+  check(await page.$$eval('#map-activities .act-row-btn', r => r.length) === 6, 'the Activities panel lists the same 6 routes');
+  check(/Run\s*6/.test(await page.$eval('#map-legend-type-items', e => e.textContent)), 'the legend counts routes per type');
+  await page.selectOption('#map-basemap', 'terrain');
+  check(await page.$eval('#heatmap', e => e.classList.contains('bm-terrain')), 'the basemap can be switched (terrain)');
+  await page.selectOption('#map-basemap', 'light');
+  await page.click('.etab[data-tab="timelapse"]');
+  await page.click('#tl-next');
+  check(/1 \/ 6/.test(await page.$eval('#tl-count-label', e => e.textContent)), 'the timelapse can be stepped one route at a time');
+  await page.click('#tl-reset-btn');
   await page.evaluate(() => { location.hash = '#/feed'; });
 
   // Modes

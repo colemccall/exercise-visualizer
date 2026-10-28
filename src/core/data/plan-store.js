@@ -47,15 +47,31 @@ export async function loadPlan() {
 }
 
 const pending = new Set();
-const flush = debounce(async (plan) => {
-  const keys = [...pending]; pending.clear();
-  for (const key of keys) await saveDoc(key, key === 'activeScenario' ? plan.activeScenario : plan[key]);
-}, 300);
+let latestPlan = null;
+let listening = false;
 
-/** Mark one part of the plan changed; it is written shortly after (inputs fire fast). */
+/** Write every pending part now (not awaited: this also runs as the page is closing). */
+function flushNow() {
+  if (!latestPlan || !pending.size) return;
+  const keys = [...pending]; pending.clear();
+  for (const key of keys) saveDoc(key, key === 'activeScenario' ? latestPlan.activeScenario : latestPlan[key]);
+}
+const flush = debounce(flushNow, 150);
+
+/**
+ * Mark one part of the plan changed. It is written shortly after (inputs fire on every
+ * keystroke), and immediately if the page is hidden or closed first: a plain debounce
+ * loses the last edits when someone reloads or closes the tab right after typing.
+ */
 export function persistPlan(plan, ...keys) {
+  latestPlan = plan;
   keys.forEach(k => pending.add(k));
-  flush(plan);
+  if (!listening && typeof window !== 'undefined') {
+    listening = true;
+    window.addEventListener('pagehide', flushNow);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushNow(); });
+  }
+  flush();
 }
 
 export const saveHealth = (health) => saveDoc('apple_health', health);

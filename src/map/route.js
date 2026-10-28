@@ -13,7 +13,7 @@
  *   route.destroy()
  */
 
-import { makeTileLayers, MAX_MAP_ZOOM } from './tiles.js';
+import { applyBasemap, MAX_MAP_ZOOM } from './tiles.js';
 import { haversine } from '../analysis/activity/streams.js';
 
 const SEGMENT_TARGET = 700; // colour segments per route: smooth enough, cheap on canvas
@@ -49,7 +49,7 @@ export function renderRoute(activity, container, { colorBy = 'auto', canvas = tr
     zoomControl: true, attributionControl: true, maxZoom: MAX_MAP_ZOOM, zoomSnap: 0.5,
     preferCanvas: canvas,
   });
-  makeTileLayers().forEach(l => l.addTo(map));
+  applyBasemap(map);
 
   const modes = colorModes(pts);
   const layer = L.layerGroup().addTo(map);

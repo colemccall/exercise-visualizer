@@ -315,7 +315,7 @@ export function renderStats(container, activities, opts = {}) {
         </thead>
         <tbody>
           ${data.types.map(t => `
-            <tr>
+            <tr class="drillable" data-drill="type:${escapeHtml(t.type.toLowerCase())}" tabindex="0" role="link" title="Show these ${escapeHtml(t.type.toLowerCase())} activities">
               <td><span class="stat-type-dot" data-type="${escapeHtml(t.type)}"></span>${escapeHtml(t.type)}</td>
               <td>${t.count.toLocaleString()}</td>
               <td>${escapeHtml(fmt.distance(t.dist))}</td>

@@ -11,11 +11,13 @@
  *   L (Leaflet), JSZip, d3
  */
 
-import { state, on, emit, scoped, mergedCount } from './core/state.js';
+import { state, on, emit, scoped, mergedCount, setFilters } from './core/state.js';
+import { parseQuery, formatQuery } from './core/lib/query.js';
+import { installDrillHandlers } from './core/drill.js';
 import {
   MODES, MODE_IDS, getMode, setMode, restoreMode, modeAvailable, viewAllowed,
 } from './core/modes.js';
-import { startRouter, navigate, hrefFor, parseHash } from './core/router.js';
+import { startRouter, navigate, hrefFor, parseHash, replaceQuery } from './core/router.js';
 import { safeStorage } from './core/lib/util.js';
 import { getUnits, setUnits } from './core/lib/format.js';
 import {
@@ -38,6 +40,8 @@ import { renderActivity, destroyActivity, setActivityHandlers } from './views/ac
 import { renderAwards } from './views/awards.js';
 import { renderProfile } from './views/profile.js';
 import { renderPlan } from './views/plan.js';
+import { renderExplore } from './views/explore.js';
+import { initSearch, syncSearchInput, setSearchOpen, isSearchOpen } from './views/search.js';
 import { renderStatsView, initStatsView, redrawCharts } from './views/stats-view.js';
 import {
   renderMapView, initMapView, invalidateMap, resetMapDrawing, clearRouteSelection,
@@ -49,7 +53,9 @@ import {
 // ═════════════════════════════════════════════════════════════════════════════
 
 const VIEW_ICON = { today: 'today', feed: 'feed', map: 'map', awards: 'awards', charts: 'charts', profile: 'profile', plan: 'plan', photos: 'photos' };
-const KNOWN_VIEWS = new Set(['today', 'feed', 'activity', 'map', 'awards', 'profile', 'plan', 'charts', 'photos']);
+const KNOWN_VIEWS = new Set(['today', 'feed', 'activity', 'map', 'awards', 'profile', 'plan', 'charts', 'photos', 'explore']);
+/** Views whose content follows the shared filters; their URL carries the query. */
+const FILTERING_VIEWS = new Set(['feed', 'explore', 'map', 'charts']);
 
 const renderers = {
   today: () => renderToday({ openUpload }),
@@ -58,6 +64,7 @@ const renderers = {
   awards: renderAwards,
   profile: renderProfile,
   plan: renderPlan,
+  explore: renderExplore,
   charts: renderStatsView,
   photos: renderPhotosView,
 };
@@ -69,7 +76,7 @@ const dirty = new Set(Object.keys(renderers));
 /** Nav tab that should look active for a view (sub-views light up their parent). */
 function navTabFor(view) {
   const nav = getMode().nav.map(n => n.view);
-  if (view === 'activity') return 'feed';
+  if (view === 'activity' || view === 'explore') return 'feed';
   if (nav.includes(view)) return view;
   if (view === 'charts' && nav.includes('profile')) return 'profile';
   if (view === 'awards' && nav.includes('today')) return 'today';   // reached from Today's Awards card
@@ -84,8 +91,15 @@ function resolveView(view) {
   return view;
 }
 
-async function onRoute({ view, param }) {
+async function onRoute({ view, param, query }) {
   if (!state.activities.length && !state.summaries.length) { openUpload(); return; }
+  // A link that carries a search (#/feed?q=type:run) applies it; one without leaves the current filters alone.
+  if (query && query !== formatQuery(state.filters)) {
+    const { filters } = parseQuery(query);
+    setFilters({ ...filters, sort: filters.sort || state.filters.sort });
+    dirtyAll();
+    syncSearchInput();
+  }
   const target = resolveView(view || getMode().landing);
   if (target !== view) { navigate(target, null, { replace: true }); return; }
   await showView(target, param);
@@ -126,18 +140,21 @@ async function showView(view, param = null) {
 
   if (view === 'map') invalidateMap();
   if (view === 'charts') redrawCharts();
+  if (FILTERING_VIEWS.has(view)) replaceQuery(formatQuery(state.filters));
   if (leaving !== view || leaving === 'activity') window.scrollTo({ top: 0, behavior: 'auto' });
 }
 
 /** Something the active view shows has changed: mark everything stale, redraw what's visible. */
+const dirtyAll = () => Object.keys(renderers).forEach(v => dirty.add(v));
+
 function refresh() {
-  Object.keys(renderers).forEach(v => dirty.add(v));
+  dirtyAll();
   if (!state.activities.length && !state.summaries.length) return;
   if (currentView) showView(currentView, currentParam);
 }
 
 on('data', () => { syncWelcome(); resetMapDrawing(); resetFeedPaging(); buildChrome(); updatePhotosBadge(); showMergeBanner(); refresh(); });
-on('filters', refresh);
+on('filters', () => { syncSearchInput(); if (FILTERING_VIEWS.has(currentView)) replaceQuery(formatQuery(state.filters)); refresh(); });
 on('theme', () => { restyleMapForTheme(); if (currentView === 'activity') showView('activity', currentParam); });
 on('units', refresh);
 on('mode', () => { resetMapDrawing(); resetFeedPaging(); buildChrome(); updatePhotosBadge(); showMergeBanner(); refresh(); });
@@ -171,6 +188,7 @@ function buildChrome() {
 function wireChrome() {
   document.getElementById('brand-mark').innerHTML = BRAND_MARK;
   document.getElementById('btn-menu').innerHTML = icon('menu');
+  document.getElementById('btn-search').innerHTML = icon('search');
   document.getElementById('btn-open-upload').innerHTML = `${icon('upload', { size: 18 })}<span>Add or replace data</span>`;
   document.getElementById('btn-delete-data').innerHTML = `${icon('trash', { size: 18 })}<span>Delete my data</span>`;
 
@@ -366,6 +384,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   initStatsView();
   initMapView();
+  initSearch();
+  installDrillHandlers();
 
   document.getElementById('btn-go').addEventListener('click', runUpload);
   document.getElementById('btn-welcome-upload').addEventListener('click', openUpload);
@@ -402,8 +422,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.addEventListener('keydown', (e) => {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || '') || e.target?.isContentEditable;
     if (e.key === 'Escape' && !anyModalOpen()) {
-      if (hasRouteSelection()) clearRouteSelection();
+      if (isSearchOpen()) setSearchOpen(false);
+      else if (hasRouteSelection()) clearRouteSelection();
       else if (isMapFullscreen()) setMapFullscreen(false);
+    } else if (e.key === '/' && !typing && !e.metaKey && !e.ctrlKey && !e.altKey && state.activities.length) {
+      e.preventDefault();
+      setSearchOpen(true);
     } else if ((e.key === 'f' || e.key === 'F') && !typing && !e.metaKey && !e.ctrlKey && !e.altKey && currentView === 'map') {
       e.preventDefault();
       toggleMapFullscreen();

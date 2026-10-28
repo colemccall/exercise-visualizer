@@ -161,6 +161,30 @@ zero progress is an **open ring**, a day without a summary adds nothing and is r
 progress is capped at the newest data day (`periodBounds`). `monthRings` returns full ring objects (it once returned bare
 percentages, which rendered every day empty). Streaks count back from the newest data day, not today.
 
+## Search, filters and drill-downs
+
+One filter object (`state.filters`, shape = `emptyFilters()` in `src/core/lib/query.js`) is the only definition of "what am I looking at".
+`activityMatches()` / `filtered()` / `sortActivities()` in `core/state.js` apply it; Feed, Stats, Map, Explore and the Plan's history all go
+through them. The search box, filter chips, chart drill-downs and URL are four views of that one object:
+
+- `parseQuery(text)` / `formatQuery(filters)` / `queryTokens(filters)` (pure, 11 tests) are the language; `queryTokens` also feeds
+  `describeFilters()`, i.e. the removable chips, so chips and text can never disagree. Unknown "word:" tokens stay plain text; a
+  recognised key with a bad value is an error chip, never silently ignored. The internal month key is "YYYY-<0-based month>".
+- `#/feed?q=…`: `core/router.js` carries `q`; `app.js` applies a link's query on arrival and `replaceQuery()`s it as filters change
+  (no history spam). A link without `q` leaves the current filters alone.
+- Drill-downs are just searches: put `data-drill="type:run year:2025"` on any element (`core/drill.js`, one delegated handler).
+- `views/search.js` (the bar, saved searches in localStorage), `views/explore.js` (sortable table + CSV).
+
+## Map
+
+`views/map-view.js`. `matchingIds()` = filtered() ∩ the drawn area; `applyHeatmapFilter()` dims everything else, re-scores **frequency over the
+matching set only**, and refreshes the filter bar, legend and Activities list. Overview polylines are Douglas-Peucker simplified to ≤3000
+vertices (`map/heatmap.js`); the pinned route is drawn from full points. Canvas hit tolerance is widened on `pointer: coarse`; a click
+also lists every other route under the point (`routesAt`, uses Leaflet's private `_containsPoint`: re-check on Leaflet upgrades).
+Basemaps live in `map/tiles.js` (light/dark/terrain/satellite, persisted); **provider terms are documented there and need a manual
+check before relying on them at scale** (Esri keyless use, OSM tile policy, OpenTopoMap). New tile hosts must also be added to the CSP
+in `index.html`. On ≥1100px the tools strip is a side panel (open by default); under that it is the folded bottom strip.
+
 ## Plan (nutrition, goals, targets)
 
 `src/analysis/health/nutrition.js` is the engine (pure, unit-tested; kg/cm/kcal/m/s internally); `src/views/plan.js` is inputs +
@@ -180,6 +204,7 @@ only *adds* the store).
   Dietary energy/macros. Basal/dietary take the *largest source per day* (no double counting, survives a device change). Active
   energy is deliberately *not* summed from records (ActivitySummary Move is authoritative). Adds ~4s to parsing a ~900MB export
   (~8s total in Node). Nothing is applied to the plan until the user presses "Fill from Apple Health".
+- Plan edits are saved with a short debounce **and flushed on pagehide/visibilitychange** (a plain debounce loses the last edits on reload).
 - Dates typed by users are parsed by components (`new Date('2026-03-01')` is UTC midnight and shifts a day west of Greenwich).
 
 ## Data flow & persistence

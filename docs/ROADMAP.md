@@ -21,7 +21,7 @@
 
 **Update (2026-10-28):** folders reorganized into `src/`; Milestone A (rings month fix + cumulative week/month/year rings, richer
 attributes, exact Strava↔Apple merge, filter fixes) and Milestone D (the **Plan** tab: nutrition scenarios, goals, exercise targets) are
-done. Remaining from the approved plan: B (search and explore) and C (map).
+done, as are B (search, drill-downs, Explore table, shareable URLs) and C (map filters, side panel, area select, basemaps, scrubber, touch). Next: make the Plan easier to use and genuinely suggestive (routes and sessions from your own history).
 
 **Next:** verify the Photo Tour and video export with real photos and on a phone; test on a physical iPhone; then Phase 2 (below). Weather and street data were ruled out.
 

@@ -5,8 +5,12 @@
  */
 
 import { TYPE_COLORS } from '../design-system/activity-colors.js';
-import { makeTileLayers, MAX_MAP_ZOOM } from './tiles.js';
+import { applyBasemap, getBasemap, MAX_MAP_ZOOM } from './tiles.js';
+import { decimate } from '../analysis/activity/streams.js';
 export { TYPE_COLORS };
+
+/** Vertices kept per route on the overview map (full detail stays in route_points). */
+const MAX_OVERVIEW_POINTS = 3000;
 
 let _routeLayerGroup = null;
 let _userMovedMap = false;
@@ -178,7 +182,7 @@ function attachRouteHandlers(polyline, activity) {
   polyline.on('mouseout',  () => _routeHandlers.onHover?.(activity, false));
   polyline.on('click', (e) => {
     L.DomEvent.stopPropagation(e);   // don't let the map's own click clear it
-    _routeHandlers.onSelect?.(activity);
+    _routeHandlers.onSelect?.(activity, e);
   });
 }
 
@@ -244,6 +248,12 @@ export function raiseHotRoutes() {
 
 export function getHeatmapInstance() { return _map; }
 
+/** Switch the basemap on the heatmap (routes stay put; only the tiles change). */
+export function setHeatmapBasemap(kind) {
+  if (!_map) return;
+  _tileLayers = applyBasemap(_map, kind, _tileLayers);
+}
+
 export function setHeatmapTheme(dark) {
   if (!_map) return;
   // The basemap itself doesn't change — CSS inverts the tile pane in dark mode.
@@ -278,10 +288,11 @@ export function initHeatmap(container, opts = {}) {
     // Hundreds of routes as SVG <path>s made hover and pan sluggish; one canvas
     // keeps it smooth into the thousands. Routes are drawn with L.canvas below.
     preferCanvas: true,
+    // A fingertip is a coarse hit target on a 2px line: widen the canvas hit-test on touch.
+    renderer: L.canvas({ padding: 0.5, tolerance: window.matchMedia?.('(pointer: coarse)').matches ? 10 : 4 }),
   });
 
-  _tileLayers = makeTileLayers();
-  _tileLayers.forEach(layer => layer.addTo(_map));
+  _tileLayers = applyBasemap(_map, getBasemap());
 
   // Once the user pans or zooms, stop re-framing the map underneath them.
   _userMovedMap = false;
@@ -369,7 +380,11 @@ export async function renderHeatmap(activities, map) {
       if (!pts || pts.length < 2) continue;
       const dark    = isDark();
       const color   = styleColor(activity, dark);
-      const latLngs = pts.filter(p => p.lat !== null && p.lng !== null).map(p => [p.lat, p.lng]);
+      // Overview lines are simplified (Douglas-Peucker keeps the shape): a 100k-point ride
+      // re-clipped on every pan was the cost of drawing hundreds of routes. The pinned
+      // route is drawn from the full points (highlightRoute), so detail is kept where it matters.
+      const positioned = pts.filter(p => p.lat !== null && p.lng !== null);
+      const latLngs = (positioned.length > MAX_OVERVIEW_POINTS ? decimate(positioned, MAX_OVERVIEW_POINTS) : positioned).map(p => [p.lat, p.lng]);
       if (latLngs.length < 2) continue;
       const { weight, opacity } = routeStyle(dark, activity);
       const polyline = L.polyline(latLngs, {

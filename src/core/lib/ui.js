@@ -106,7 +106,9 @@ export function syncNavHeight() {
   const tabs = document.getElementById('nav-tabs');
   const navH = nav ? nav.offsetHeight : 56;
   const bannerH = banner && banner.offsetParent !== null ? banner.offsetHeight : 0;
+  const search = document.getElementById('search-bar');
+  const searchH = search && !search.hidden && search.offsetParent !== null ? search.offsetHeight : 0;
   const bottomBar = tabs && getComputedStyle(tabs).position === 'fixed';
-  document.body.style.setProperty('--nav-h', `${navH + bannerH}px`);
+  document.body.style.setProperty('--nav-h', `${navH + bannerH + searchH}px`);
   document.body.style.setProperty('--tabbar-h', bottomBar ? `${tabs.offsetHeight}px` : '0px');
 }

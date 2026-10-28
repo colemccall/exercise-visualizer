@@ -5,6 +5,7 @@
  */
 
 import { addTooltip } from './tooltip.js';
+import { drillTo } from '../core/drill.js';
 import { escapeHtml } from '../core/lib/util.js';
 import { TYPE_COLORS } from '../design-system/activity-colors.js';
 
@@ -110,6 +111,8 @@ export function renderWeeklyChart(activities, container, units = 'imperial') {
       const intensity = 0.25 + 0.75 * (d.count / maxCount);
       return colorWithOpacity(base, intensity);
     })
+    .style('cursor', d => (d.count ? 'pointer' : 'default'))
+    .on('click', (event, d) => { if (d.count) { tooltip.hide(); drillTo(`after:${d.key} before:${d.key}`); } })
     .on('mousemove', (event, d) => {
       if (d.count === 0) return;
       const dateStr = d.date.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' });

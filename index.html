@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <!-- viewport-fit=cover lets the page paint into the notch/home-indicator area;
        the safe-area-inset padding in the mobile block below keeps content clear of it. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tile.openstreetmap.org; media-src 'self' blob:; connect-src 'self' blob: https://server.arcgisonline.com https://tile.openstreetmap.org https://nominatim.openstreetmap.org; font-src 'self'; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.opentopomap.org; media-src 'self' blob:; connect-src 'self' blob: https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.opentopomap.org https://nominatim.openstreetmap.org; font-src 'self'; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Fitness Visualizer</title>
   <meta name="description" content="See your Strava and Apple Health workouts together. Everything stays in your browser." />
@@ -2236,6 +2236,7 @@
   <div class="nav-tabs" id="nav-tabs"></div>
   <div class="nav-actions">
     <div class="mode-switch" id="mode-switch" role="radiogroup" aria-label="Experience"></div>
+    <button type="button" class="icon-btn" id="btn-search" aria-label="Search activities" aria-expanded="false" aria-controls="search-bar" title="Search (press /)"></button>
     <button type="button" class="icon-btn" id="btn-theme-toggle" aria-label="Switch to dark mode" aria-pressed="false"></button>
     <div class="menu-wrap">
       <button type="button" class="icon-btn" id="btn-menu" aria-haspopup="true" aria-expanded="false" aria-controls="menu-pop" aria-label="Settings and data"></button>
@@ -2259,6 +2260,25 @@
   <span class="dup-text"><strong><span id="dup-count">0</span> workouts</strong> appear in both Strava and Apple Watch; each is shown once.</span>
   <button type="button" class="dup-btn-review" id="btn-dup-review">Show merged</button>
   <button type="button" class="dup-btn-dismiss" id="btn-dup-dismiss" aria-label="Dismiss">&times;</button>
+</div>
+
+<div id="search-bar" class="search-bar" role="search" hidden>
+  <div class="search-row">
+    <input id="global-search" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search activities"
+           placeholder="Search…  try  hill  type:run  year:2025  dist:>10km  sort:-dist">
+    <button type="button" class="bs-btn bs-btn-ghost" id="search-clear">Clear</button>
+    <button type="button" class="icon-btn" id="search-close" aria-label="Close search">&times;</button>
+  </div>
+  <div class="search-meta">
+    <span id="search-summary" class="search-summary" aria-live="polite"></span>
+    <span class="search-actions">
+      <button type="button" class="bs-btn bs-btn-ghost" id="search-save">Save search</button>
+      <button type="button" class="bs-btn bs-btn-ghost" id="search-table">Table view</button>
+    </span>
+  </div>
+  <div id="search-errors" class="search-errors" hidden></div>
+  <div id="search-saved" class="search-chips" hidden></div>
+  <div id="search-help" class="search-chips"></div>
 </div>
 
 <!-- ================================================================
@@ -2391,10 +2411,31 @@
             <button type="button" class="hm-style-btn active" data-style="type" aria-pressed="true">By type</button>
             <button type="button" class="hm-style-btn" data-style="frequency" aria-pressed="false">Frequency</button>
           </div>
+          <label class="sr-only" for="map-basemap">Map style</label>
+          <select id="map-basemap" class="map-select" title="Map style">
+            <option value="light">Light map</option><option value="dark">Dark map</option>
+            <option value="terrain">Terrain</option><option value="satellite">Satellite</option>
+          </select>
+          <button type="button" class="map-icon-btn" id="btn-map-area" aria-pressed="false" title="Draw a box to see the activities that pass through it">
+            <span class="map-icon-glyph" aria-hidden="true">&#9635;</span><span class="map-icon-label">Select area</span>
+          </button>
+          <button type="button" class="map-icon-btn" id="btn-map-tools" aria-pressed="true" title="Show or hide the side panel">
+            <span class="map-icon-glyph" aria-hidden="true">&#9776;</span><span class="map-icon-label">Panel</span>
+          </button>
           <button type="button" class="map-icon-btn" id="btn-map-fullscreen"
                   aria-pressed="false" title="Fill the screen with the map (F, or Esc to exit)">
             <span class="map-icon-glyph" aria-hidden="true">&#9974;</span><span class="map-icon-label">Expand map</span>
           </button>
+        </div>
+
+        <!-- Filters for the routes on the map (the same filters as the search box) -->
+        <div class="map-filters" id="map-filters" role="group" aria-label="Filter the routes on the map">
+          <div class="chips" id="map-chips"></div>
+          <label class="sr-only" for="map-year">Year</label>
+          <select id="map-year" class="map-select"></select>
+          <span class="map-count" id="map-count" aria-live="polite"></span>
+          <button type="button" class="map-mini-btn" id="map-fit" title="Zoom to the routes shown">Fit</button>
+          <button type="button" class="map-mini-btn" id="map-clear" hidden>Clear</button>
         </div>
 
         <!-- Legends — one per heat style -->
@@ -2422,6 +2463,7 @@
             <button type="button" class="route-card-btn" id="btn-route-detail">Open details</button>
             <button type="button" class="route-card-btn" id="btn-route-zoom">Zoom to route</button>
           </div>
+          <div class="route-pick" id="route-card-pick" hidden></div>
           <div class="route-card-hint" id="route-card-hint">Click a route to pin it here</div>
         </div>
       </div>
@@ -2429,7 +2471,8 @@
       <div id="explore-panel">
         <div class="explore-head">
           <div class="explore-tabs" role="tablist" aria-label="Map tools">
-            <button class="etab active" data-tab="locations" role="tab" aria-selected="true">Locations</button>
+            <button class="etab active" data-tab="activities" role="tab" aria-selected="true">Activities</button>
+            <button class="etab" data-tab="locations" role="tab" aria-selected="false" tabindex="-1">Locations</button>
             <button class="etab" data-tab="months" role="tab" aria-selected="false" tabindex="-1">By Month</button>
             <button class="etab" data-tab="timelapse" role="tab" aria-selected="false" tabindex="-1">Timelapse</button>
           </div>
@@ -2444,7 +2487,13 @@
         <div class="collapsible-body" id="explore-panel-body">
 
         <!-- Locations tab -->
-        <div role="tabpanel" class="etab-pane active" id="etab-locations">
+        <!-- Activities tab: the routes on the map as a list; hover previews, click pins -->
+        <div role="tabpanel" class="etab-pane active" id="etab-activities">
+          <div id="map-area-summary" class="map-area-summary" hidden></div>
+          <div id="map-activities" class="map-activities"></div>
+        </div>
+
+        <div role="tabpanel" class="etab-pane" id="etab-locations">
           <div id="locations-list" style="font-size:12px;color:var(--text-muted);">
             Load activities with GPS routes to see top locations.
           </div>
@@ -2459,9 +2508,13 @@
         <div role="tabpanel" class="etab-pane" id="etab-timelapse">
           <p class="tl-panel-hint">Animate your routes chronologically &mdash; oldest to newest. Each route flashes as it's added.</p>
           <div style="display:flex;gap:var(--sp-2);margin-bottom:var(--sp-3);">
+            <button class="tl-reset-btn" id="tl-prev" aria-label="Previous route" title="Previous route">&lsaquo;</button>
             <button class="tl-play-btn" id="tl-play-btn" style="flex:1;">&#9654; Play</button>
+            <button class="tl-reset-btn" id="tl-next" aria-label="Next route" title="Next route">&rsaquo;</button>
             <button class="tl-reset-btn" id="tl-reset-btn">&#9632; Reset</button>
           </div>
+          <label class="sr-only" for="tl-scrub">Scrub through your routes in time</label>
+          <input type="range" id="tl-scrub" class="tl-scrub" min="0" max="0" value="0" step="1" />
           <div class="tl-progress-track" style="height:6px;margin-bottom:var(--sp-2);">
             <div class="tl-progress-fill" id="tl-progress-bar"></div>
           </div>
@@ -2485,6 +2538,7 @@
   <section class="app-view" data-view="awards" id="view-awards" aria-label="Awards"></section>
   <section class="app-view" data-view="profile" id="view-profile" aria-label="Profile"></section>
   <section class="app-view" data-view="plan" id="view-plan" aria-label="Plan"></section>
+  <section class="app-view" data-view="explore" id="view-explore" aria-label="Explore"></section>
 
   <!-- ══════ STATS & CHARTS ══════ -->
   <section class="app-view" data-view="charts" id="view-charts" aria-label="Stats and charts">

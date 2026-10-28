@@ -32,8 +32,9 @@ export function renderYearSummary(container, acts, { year, onYear } = {}) {
   const el = formatElevation(s.elevation_m).split(' ');
 
   const monthMax = Math.max(1, ...(cmp ? cmp.by_month.map(m => Math.max(m.a, m.b)) : s.by_month.map(m => m.distance_m)));
+  const yq = sel ? ` year:${sel}` : '';
   const bars = (cmp ? cmp.by_month : s.by_month.map((m, i) => ({ month: i, a: 0, b: m.distance_m }))).map((m, i) => `
-    <div class="mb" title="${MONTH_SHORT[i]}: ${escapeHtml(formatDistance(m.b))}${cmp ? ` (prev year ${escapeHtml(formatDistance(m.a))})` : ''}">
+    <div class="mb${sel && m.b > 0 ? ' drillable' : ''}" ${sel && m.b > 0 ? `data-drill="month:${sel}-${String(i + 1).padStart(2, '0')}" tabindex="0" role="link"` : ''} title="${MONTH_SHORT[i]}: ${escapeHtml(formatDistance(m.b))}${cmp ? ` (prev year ${escapeHtml(formatDistance(m.a))})` : ''}">
       <span class="mb-bars">
         ${cmp ? `<span class="mb-bar prev" style="height:${Math.round((m.a / monthMax) * 100)}%"></span>` : ''}
         <span class="mb-bar cur" style="height:${Math.round((m.b / monthMax) * 100)}%"></span>
@@ -70,7 +71,7 @@ export function renderYearSummary(container, acts, { year, onYear } = {}) {
         <h3 id="ys-t" class="ys-title">By activity type</h3>
         <ul class="type-bars">
           ${types.map(([t, v]) => `
-            <li><span class="tb-name"><i style="background:${TYPE_COLORS[t] || TYPE_COLORS.Other}"></i>${escapeHtml(t)}</span>
+            <li class="drillable" data-drill="type:${escapeHtml(t.toLowerCase())}${yq}" tabindex="0" role="link"><span class="tb-name"><i style="background:${TYPE_COLORS[t] || TYPE_COLORS.Other}"></i>${escapeHtml(t)}</span>
               <span class="tb-bar"><span style="width:${Math.max(3, Math.round((v.moving_s / typeMax) * 100))}%;background:${TYPE_COLORS[t] || TYPE_COLORS.Other}"></span></span>
               <span class="tb-val">${v.count} · ${escapeHtml(formatMovingTime(v.moving_s))}</span></li>`).join('')}
         </ul>

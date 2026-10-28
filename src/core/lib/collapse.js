@@ -16,13 +16,17 @@ import { safeStorage } from './util.js';
 const PREFIX = 'fitness-collapsed:';
 
 /** Sections that start folded. The map's tools strip does, so Map is just the map. */
-const COLLAPSED_BY_DEFAULT = { explore: true };
+const COLLAPSED_BY_DEFAULT = {
+  // Open by default on desktop (it is a sidebar there and the tools are the point of the
+  // page); folded on phones, where it would cover the map.
+  explore: () => typeof matchMedia === 'function' && matchMedia('(max-width: 900px)').matches,
+};
 
 const sectionFor = (toggle) => toggle.closest('.panel, .chart-card, #explore-panel');
 
 export function isCollapsed(key) {
   const stored = safeStorage.get(PREFIX + key);
-  if (stored === null) return !!COLLAPSED_BY_DEFAULT[key];
+  if (stored === null) { const d = COLLAPSED_BY_DEFAULT[key]; return typeof d === 'function' ? !!d() : !!d; }
   return stored === '1';
 }
 
